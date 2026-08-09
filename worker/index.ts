@@ -123,6 +123,16 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
       console.log(
         `worker: ${eventId} → ${analysis.verified ? "จริง" : "หลอก"} [${analysis.severity}] ${analysis.description_th}`,
       );
+    } else {
+      // No snapshot to analyze — still stamp processed_at so reconciliation
+      // knows this event is settled and never re-enqueues it.
+      await updateAi(eventId, {
+        verified: null,
+        severity: null,
+        description_th: null,
+        model: null,
+        processed_at: new Date().toISOString(),
+      });
     }
     await ack(msg.msg_id);
   } catch (err) {
@@ -197,10 +207,43 @@ async function checkHeartbeats(): Promise<void> {
   }
 }
 
+// Reconciliation (architecture doc §ความทนทาน): events whose enqueue was lost
+// (webhook enqueue failure, crash between insert and send) sit with a null
+// processed_at forever. Sweep them back into the queue. Duplicate messages are
+// harmless — handleMessage acks already-processed events untouched.
+const RECONCILE_MS = 120_000;
+const RECONCILE_MIN_AGE_MS = 3 * 60_000;
+
+async function reconcileStuckEvents(): Promise<void> {
+  const cutoff = new Date(Date.now() - RECONCILE_MIN_AGE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("events")
+    .select("event_id")
+    .filter("ai->>processed_at", "is", null)
+    .lt("received_at", cutoff)
+    .limit(20);
+  if (error) {
+    console.error("worker: reconcile query failed", error.message);
+    return;
+  }
+  for (const row of data ?? []) {
+    const { error: enqueueError } = await supabase.rpc("enqueue_event", {
+      p_event_id: row.event_id,
+    });
+    if (enqueueError) {
+      console.error(`worker: reconcile enqueue ${row.event_id} failed`, enqueueError.message);
+    } else {
+      console.log(`worker: reconcile — requeued stuck event ${row.event_id}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   console.log("tassana-ai worker: started (pgmq → Gemini → events.ai)");
   void checkHeartbeats();
   setInterval(() => void checkHeartbeats(), HEARTBEAT_CHECK_MS);
+  void reconcileStuckEvents();
+  setInterval(() => void reconcileStuckEvents(), RECONCILE_MS);
   for (;;) {
     try {
       const { data, error } = await supabase.rpc("dequeue_events", {
