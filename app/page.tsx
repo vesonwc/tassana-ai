@@ -20,6 +20,20 @@ export default function HomePage() {
       <p style={{ margin: 0, fontSize: "0.9rem", color: "#999" }}>
         ระบบอยู่ระหว่างพัฒนา (MVP)
       </p>
+      <a
+        href="/login"
+        style={{
+          marginTop: "0.75rem",
+          padding: "0.6rem 1.5rem",
+          background: "#1a7f37",
+          color: "#fff",
+          borderRadius: 8,
+          textDecoration: "none",
+          fontWeight: 600,
+        }}
+      >
+        เข้าสู่ระบบ
+      </a>
     </main>
   );
 }
