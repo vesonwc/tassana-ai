@@ -28,3 +28,6 @@ startup/
 
 # personal test images
 ทดลองใช้/
+
+# accuracy test images and results (local only)
+testdata/

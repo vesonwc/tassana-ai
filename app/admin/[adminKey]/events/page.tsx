@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getServiceClient } from "@/lib/supabase";
 import type { EventType } from "@/lib/types";
+import { submitFeedback } from "./actions";
 
 // Interim admin view (pre-M4): secret path segment instead of real auth.
 // Replaced by Supabase Auth login in M4.
@@ -34,6 +35,7 @@ interface EventRow {
   raw: Record<string, unknown>;
   cameras: { name: string } | null;
   sites: { name: string } | null;
+  alerts: { feedback: string | null }[];
 }
 
 function formatThaiTime(iso: string): string {
@@ -60,7 +62,7 @@ export default async function AdminEventsPage({
   const { data, error } = await supabase
     .from("events")
     .select(
-      "event_id, event_type, source_type, occurred_at, detection, ai, raw, cameras(name), sites(name)",
+      "event_id, event_type, source_type, occurred_at, detection, ai, raw, cameras(name), sites(name), alerts(feedback)",
     )
     .order("occurred_at", { ascending: false })
     .limit(50);
@@ -82,6 +84,7 @@ export default async function AdminEventsPage({
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
         {events.map((ev) => {
           const isAlarm = ALARM_TYPES.includes(ev.event_type);
+          const feedback = ev.alerts?.[0]?.feedback ?? null;
           return (
             <div
               key={ev.event_id}
@@ -113,6 +116,36 @@ export default async function AdminEventsPage({
               <span style={{ color: "#777", fontSize: "0.85rem" }}>
                 {formatThaiTime(ev.occurred_at)} · {ev.sites?.name ?? ""} ·{" "}
                 {ev.source_type}
+              </span>
+              <span style={{ marginLeft: "auto" }}>
+                {feedback === "false_alarm" ? (
+                  <span style={{ color: "#b06000", fontSize: "0.85rem" }}>
+                    ✓ บันทึกว่าแจ้งเท็จแล้ว
+                  </span>
+                ) : feedback === "confirmed" ? (
+                  <span style={{ color: "#1a7f37", fontSize: "0.85rem" }}>
+                    ✓ ยืนยันเหตุจริงแล้ว
+                  </span>
+                ) : (
+                  <form action={submitFeedback} style={{ display: "inline-flex", gap: "0.4rem" }}>
+                    <input type="hidden" name="adminKey" value={adminKey} />
+                    <input type="hidden" name="eventId" value={ev.event_id} />
+                    <button
+                      name="feedback"
+                      value="false_alarm"
+                      style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}
+                    >
+                      แจ้งเท็จ
+                    </button>
+                    <button
+                      name="feedback"
+                      value="confirmed"
+                      style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}
+                    >
+                      เหตุจริง
+                    </button>
+                  </form>
+                )}
               </span>
             </div>
           );

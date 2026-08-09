@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { v7 as uuidv7 } from "uuid";
 import {
   analyzeSnapshot,
   VlmTimeoutError,
@@ -19,6 +20,8 @@ try {
 
 const POLL_INTERVAL_MS = 3_000;
 const MAX_ATTEMPTS = 3;
+const HEARTBEAT_CHECK_MS = 60_000;
+const HEARTBEAT_TIMEOUT_MIN = Number(process.env.HEARTBEAT_TIMEOUT_MIN ?? 10);
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -145,8 +148,59 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   }
 }
 
+// Site gone quiet past the threshold → one camera_offline event per outage.
+// Idempotency via source_raw_id keyed on the frozen heartbeat_at, so restarts
+// and repeated checks cannot double-alert for the same outage (ADR: 23505 = seen).
+async function checkHeartbeats(): Promise<void> {
+  const cutoff = new Date(
+    Date.now() - HEARTBEAT_TIMEOUT_MIN * 60_000,
+  ).toISOString();
+  const { data, error } = await supabase
+    .from("sites")
+    .select("id, name, heartbeat_at")
+    .eq("status", "active")
+    .not("heartbeat_at", "is", null)
+    .lt("heartbeat_at", cutoff);
+  if (error) {
+    console.error("worker: heartbeat query failed", error.message);
+    return;
+  }
+  const now = new Date().toISOString();
+  for (const site of data ?? []) {
+    const { error: insertError } = await supabase.from("events").insert({
+      event_id: uuidv7(),
+      site_id: site.id,
+      camera_id: null,
+      source_type: "manual",
+      source_raw_id: `heartbeat:${site.id}:${site.heartbeat_at}`,
+      event_type: "camera_offline",
+      occurred_at: now,
+      received_at: now,
+      detection: { label: null, confidence: null, zone: null, plate: null, bbox: null },
+      media: { snapshot_path: null, clip_path: null, clip_status: "none" },
+      ai: { verified: null, severity: null, description_th: null, model: null, processed_at: null },
+      raw: {
+        reason: "heartbeat_timeout",
+        threshold_min: HEARTBEAT_TIMEOUT_MIN,
+        last_heartbeat_at: site.heartbeat_at,
+      },
+    });
+    if (insertError) {
+      if (insertError.code !== "23505") {
+        console.error("worker: offline event insert failed", insertError.message);
+      }
+    } else {
+      console.log(
+        `worker: ไซต์ "${site.name}" เงียบเกิน ${HEARTBEAT_TIMEOUT_MIN} นาที → camera_offline`,
+      );
+    }
+  }
+}
+
 async function main(): Promise<void> {
   console.log("tassana-ai worker: started (pgmq → Gemini → events.ai)");
+  void checkHeartbeats();
+  setInterval(() => void checkHeartbeats(), HEARTBEAT_CHECK_MS);
   for (;;) {
     try {
       const { data, error } = await supabase.rpc("dequeue_events", {
