@@ -25,3 +25,6 @@ supabase/.temp/
 # starter docs (duplicated into docs/) + Office temp files
 startup/
 ~$*
+
+# personal test images
+ทดลองใช้/
