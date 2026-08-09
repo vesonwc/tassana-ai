@@ -3,14 +3,14 @@
 กติกา: ทำทีละ milestone จบ → commit → ติ๊กสถานะ → ค่อยเริ่มอันถัดไป
 ห้ามเปิดสอง milestone พร้อมกัน
 
-## M0 — โครงพื้นฐาน deploy ผ่าน [สถานะ: ส่วน local เสร็จ — รอเชื่อม Vercel/Supabase (ต้องใช้บัญชีผู้ใช้)]
-- [x] Next.js app (App Router, TypeScript) + `npm run build` ผ่าน (2026-08-09)
+## M0 — โครงพื้นฐาน deploy ผ่าน [สถานะ: ✅ เสร็จ 2026-08-09]
+- [x] Next.js app (App Router, TypeScript) + `npm run build` ผ่าน
 - [x] `.env.example` + `.gitignore` (`.env` ไม่เข้า git)
-- [x] git init + commit แรก
-- [ ] ผูกรีโป GitHub + ขึ้น Vercel — **รอผู้ใช้สร้างบัญชี/โปรเจกต์**
-- [ ] Supabase project + เชื่อม local ด้วย supabase CLI — **รอผู้ใช้สร้างโปรเจกต์**
-- [ ] .env จริงครบทั้ง local และ Vercel
-- **เสร็จเมื่อ:** push แล้วเว็บอัปเดตอัตโนมัติ, `npm run dev` รันผ่าน
+- [x] git init + commit
+- [x] GitHub: https://github.com/vesonwc/tassana-ai (private) + Vercel: https://tassana-ai.vercel.app (team pontunjai, Hobby)
+- [x] Supabase project จริง (บัญชีธุรกิจใหม่) — schema apply ผ่าน SQL Editor
+- [x] .env ครบทั้ง local และ Vercel (3 ตัว: URL, publishable, secret)
+- [x] **เสร็จเมื่อ:** push แล้วเว็บอัปเดตอัตโนมัติ ✅, `npm run dev` รันผ่าน ✅, webhook โปรดักชันทดสอบผ่าน (201/ซ้ำ/401)
 
 ## M1 — Schema + Webhook receiver [สถานะ: ✅ เสร็จ 2026-08-09]
 - [x] Migration สร้างตาราง sites, cameras, events, alerts, reports + pgmq queue (`supabase/migrations/20260809000001_init_schema.sql`)
