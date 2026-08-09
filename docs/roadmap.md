@@ -39,7 +39,7 @@
 - [x] Manual adapter (`lib/normalizers/manual.ts`) + test รวม 22 ข้อผ่าน; bucket `snapshots` + กล้อง pocket3 สร้างแล้ว
 - [x] รัน migration 0002 (dequeue/ack) + GEMINI_API_KEY (key รูปแบบใหม่ `AQ.` ใช้ได้; model = `gemini-flash-latest` กันรุ่นถูกปิด)
 - [x] **E2E ผ่านครั้งแรก 2026-08-09 14:42** — กล้องโน้ตบุ๊ก (Pocket 3 รอสายข้อมูล): motion → upload → webhook → คิว → Gemini → "พบชายสวมแว่นตากำลังดื่มน้ำจากแก้ว..." ขึ้นหน้า /admin; retry อัตโนมัติพิสูจน์แล้ว (event แรกล้มเพราะชื่อรุ่น → คิวส่งซ้ำ → สำเร็จ ไม่มี event หาย)
-- [ ] สลับ agent เป็น Pocket 3 เมื่อได้สาย USB-C แบบข้อมูล
+- [x] สลับ agent เป็น Pocket 3 สำเร็จ 2026-08-09 16:03 — ffmpeg เห็น "OsmoPocket3", E2E ผ่าน (motion → คลาวด์วิเคราะห์ → "พบชายสวมแว่นตาและเสื้อยืดสีเข้ม ถือถุงสิ่งของ...") ภาพคมขึ้น คำบรรยายละเอียดขึ้นชัดเจน
 - [x] **Deploy worker ขึ้น Railway สำเร็จ 2026-08-09 15:14** — trial account (บัญชี GitHub vesonwc), region EU West, พิสูจน์แล้ว: ปิดทุกอย่างในเครื่อง → ยิง event → worker คลาวด์วิเคราะห์เอง (บทเรียน: ต้อง pin Node>=22 ใน engines และห้ามตั้ง buildCommand ซ้ำกับ install phase ของ Nixpacks — EBUSY cache mount)
 - หมายเหตุ: เหลือส่วนเดียวที่รันในเครื่องคือ capture agent (ผูกกับกล้อง USB โดยธรรมชาติ — หมดความจำเป็นเมื่อต่อ NVR จริงใน M6)
 - **เสร็จเมื่อ:** ทดสอบชุดภาพจริง 20-30 ภาพ (คน/หมา/เงา/ฝน) แล้วบันทึกผล % ความถูกต้องลงไฟล์นี้
