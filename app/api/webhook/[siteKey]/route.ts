@@ -70,26 +70,20 @@ export async function POST(
     receivedAt,
   });
 
-  // Idempotency: unique (site_id, source_type, source_raw_id) — a duplicate
-  // upserts to nothing and must not create a second alert.
-  const { data: inserted, error: insertError } = await supabase
-    .from("events")
-    .upsert(event, {
-      onConflict: "site_id,source_type,source_raw_id",
-      ignoreDuplicates: true,
-    })
-    .select("event_id");
+  // Idempotency: the partial unique index (site_id, source_type, source_raw_id)
+  // rejects re-posts of the same device alarm; PostgREST upsert cannot target a
+  // partial index, so insert and treat unique_violation as "duplicate".
+  const { error: insertError } = await supabase.from("events").insert(event);
 
   if (insertError) {
+    if (insertError.code === "23505") {
+      return NextResponse.json(
+        { ok: true, duplicate: true, event_id: null },
+        { status: 200 },
+      );
+    }
     console.error("webhook: event insert failed", insertError);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
-  }
-
-  if (!inserted || inserted.length === 0) {
-    return NextResponse.json(
-      { ok: true, duplicate: true, event_id: null },
-      { status: 200 },
-    );
   }
 
   const { error: enqueueError } = await supabase.rpc("enqueue_event", {

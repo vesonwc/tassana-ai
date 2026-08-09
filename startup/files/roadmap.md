@@ -3,23 +3,19 @@
 กติกา: ทำทีละ milestone จบ → commit → ติ๊กสถานะ → ค่อยเริ่มอันถัดไป
 ห้ามเปิดสอง milestone พร้อมกัน
 
-## M0 — โครงพื้นฐาน deploy ผ่าน [สถานะ: ส่วน local เสร็จ — รอเชื่อม Vercel/Supabase (ต้องใช้บัญชีผู้ใช้)]
-- [x] Next.js app (App Router, TypeScript) + `npm run build` ผ่าน (2026-08-09)
-- [x] `.env.example` + `.gitignore` (`.env` ไม่เข้า git)
-- [x] git init + commit แรก
-- [ ] ผูกรีโป GitHub + ขึ้น Vercel — **รอผู้ใช้สร้างบัญชี/โปรเจกต์**
-- [ ] Supabase project + เชื่อม local ด้วย supabase CLI — **รอผู้ใช้สร้างโปรเจกต์**
-- [ ] .env จริงครบทั้ง local และ Vercel
+## M0 — โครงพื้นฐาน deploy ผ่าน [สถานะ: ยังไม่เริ่ม]
+- Next.js app + ผูกรีโป + ขึ้น Vercel (หน้าเปล่าก็ได้)
+- Supabase project + เชื่อม local ด้วย supabase CLI
+- .env ครบทั้ง local และ Vercel
 - **เสร็จเมื่อ:** push แล้วเว็บอัปเดตอัตโนมัติ, `npm run dev` รันผ่าน
 
-## M1 — Schema + Webhook receiver [สถานะ: ✅ เสร็จ 2026-08-09]
-- [x] Migration สร้างตาราง sites, cameras, events, alerts, reports + pgmq queue (`supabase/migrations/20260809000001_init_schema.sql`)
-- [x] `POST /api/webhook/[siteKey]` ตรวจ siteKey (ผิด → 401) → normalize → insert idempotent → enqueue pgmq
-- [x] Event normalizer hikvision_isapi (`lib/normalizers/hikvision.ts`) + dispatch (`lib/normalize.ts`)
-- [x] Seed site ทดสอบ 1 แห่ง กล้อง 2 ตัว (`supabase/seed.sql`)
-- [x] Test 18 ข้อผ่าน (2026-08-09): normalizer ดี/เสีย/ไม่รู้จัก/ซ้ำ + webhook 401/400/duplicate
-- [x] **เสร็จเมื่อ:** ยิง payload ปลอมด้วย curl → เห็นแถวใหม่ในตาราง events ถูกต้องทุก field ✅ ทดสอบผ่านกับ Supabase จริง 2026-08-09 (valid→201, ซ้ำ→200 ไม่สร้างแถวใหม่, siteKey ผิด→401, camera_id resolve ถูกทั้ง 2 กล้อง, heartbeat อัปเดต, enqueue pgmq ไม่มี error)
-- หมายเหตุ: migration แรก apply ผ่าน SQL Editor (ยังไม่ได้ `supabase link` CLI — ค่อยทำตอนต้องการ migration ถัดไป)
+## M1 — Schema + Webhook receiver [สถานะ: ยังไม่เริ่ม]
+- Migration สร้างตาราง sites, cameras, events, alerts, reports ตาม docs/event-schema.md
+- `POST /api/webhook/[siteKey]` ตรวจ siteKey → normalize → insert events → enqueue pgmq
+- Event normalizer สำหรับ hikvision_isapi (ตัวแรก) + test
+- Seed ข้อมูล: site ทดสอบ 1 แห่ง กล้อง 2 ตัว
+- **เสร็จเมื่อ:** ยิง payload ปลอมด้วย curl → เห็นแถวใหม่ในตาราง events ถูกต้องทุก field
+- **ต้องมี test:** normalizer (payload ดี/เสีย/ไม่รู้จัก/ซ้ำ) + webhook route (siteKey ผิดต้อง 401)
 
 ## M2 — LINE แจ้งเตือน [สถานะ: ยังไม่เริ่ม]
 - LINE client ใน /lib ส่งข้อความ + รูปเข้ากลุ่ม

@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Supabase mock -----------------------------------------------------------
 const state = {
   site: { id: "site-uuid-1", status: "active" } as { id: string } | null,
   camera: { id: "cam-uuid-1" } as { id: string } | null,
   insertDuplicate: false,
-  upsertCalls: [] as unknown[],
+  insertCalls: [] as unknown[],
   rpcCalls: [] as { fn: string; args: unknown }[],
   heartbeatCalls: 0,
 };
@@ -45,15 +45,12 @@ function fakeClient() {
       }
       if (table === "events") {
         return {
-          upsert: (row: unknown) => {
-            state.upsertCalls.push(row);
+          insert: async (row: unknown) => {
+            state.insertCalls.push(row);
             return {
-              select: async () => ({
-                data: state.insertDuplicate
-                  ? []
-                  : [{ event_id: (row as { event_id: string }).event_id }],
-                error: null,
-              }),
+              error: state.insertDuplicate
+                ? { code: "23505", message: "duplicate key value" }
+                : null,
             };
           },
         };
@@ -100,7 +97,7 @@ beforeEach(() => {
   state.site = { id: "site-uuid-1" };
   state.camera = { id: "cam-uuid-1" };
   state.insertDuplicate = false;
-  state.upsertCalls = [];
+  state.insertCalls = [];
   state.rpcCalls = [];
   state.heartbeatCalls = 0;
 });
@@ -111,14 +108,14 @@ describe("POST /api/webhook/[siteKey]", () => {
     state.site = null;
     const res = await callRoute("wrong-key", JSON.stringify(GOOD_PAYLOAD));
     expect(res.status).toBe(401);
-    expect(state.upsertCalls).toHaveLength(0);
+    expect(state.insertCalls).toHaveLength(0);
     expect(state.rpcCalls).toHaveLength(0);
   });
 
   it("returns 400 for a non-JSON body", async () => {
     const res = await callRoute("good-key", "this is not json");
     expect(res.status).toBe(400);
-    expect(state.upsertCalls).toHaveLength(0);
+    expect(state.insertCalls).toHaveLength(0);
   });
 
   it("normalizes, inserts, and enqueues a valid event (201)", async () => {
@@ -133,8 +130,8 @@ describe("POST /api/webhook/[siteKey]", () => {
     expect(body.ok).toBe(true);
     expect(body.duplicate).toBe(false);
 
-    expect(state.upsertCalls).toHaveLength(1);
-    const row = state.upsertCalls[0] as NormalizedEvent;
+    expect(state.insertCalls).toHaveLength(1);
+    const row = state.insertCalls[0] as NormalizedEvent;
     expect(row.site_id).toBe("site-uuid-1");
     expect(row.camera_id).toBe("cam-uuid-1");
     expect(row.event_type).toBe("line_crossing");
@@ -165,16 +162,17 @@ describe("POST /api/webhook/[siteKey]", () => {
     state.camera = null;
     const res = await callRoute("good-key", JSON.stringify(GOOD_PAYLOAD));
     expect(res.status).toBe(201);
-    const row = state.upsertCalls[0] as NormalizedEvent;
+    const row = state.insertCalls[0] as NormalizedEvent;
     expect(row.camera_id).toBeNull();
   });
 
   it("stores an unrecognizable payload as manual/unknown instead of dropping it", async () => {
     const res = await callRoute("good-key", JSON.stringify({ hello: "world" }));
     expect(res.status).toBe(201);
-    const row = state.upsertCalls[0] as NormalizedEvent;
+    const row = state.insertCalls[0] as NormalizedEvent;
     expect(row.source_type).toBe("manual");
     expect(row.event_type).toBe("unknown");
     expect(row.raw).toEqual({ hello: "world" });
   });
 });
+
