@@ -94,6 +94,12 @@ export default async function SiteEventsPage({
         >
           ⚙️ ตั้งค่าการแจ้งเตือน
         </Link>
+        <Link
+          href={`/dashboard/sites/${siteId}/report`}
+          style={{ fontSize: "0.9rem", color: "#009E4A", fontWeight: 500 }}
+        >
+          📊 รายงาน
+        </Link>
         <Link href="/dashboard" style={{ fontSize: "0.9rem", color: "#9E9E9E", marginLeft: "auto" }}>
           ← ทุกโครงการ
         </Link>
