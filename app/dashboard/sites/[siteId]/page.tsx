@@ -90,11 +90,11 @@ export default async function SiteEventsPage({
         <h1 style={{ margin: 0, fontSize: "1.3rem" }}>{site.name}</h1>
         <Link
           href={`/dashboard/sites/${siteId}/settings`}
-          style={{ fontSize: "0.9rem", color: "#1a6fb0" }}
+          style={{ fontSize: "0.9rem", color: "#009E4A", fontWeight: 500 }}
         >
           ⚙️ ตั้งค่าการแจ้งเตือน
         </Link>
-        <Link href="/dashboard" style={{ fontSize: "0.9rem", color: "#667", marginLeft: "auto" }}>
+        <Link href="/dashboard" style={{ fontSize: "0.9rem", color: "#9E9E9E", marginLeft: "auto" }}>
           ← ทุกโครงการ
         </Link>
       </div>
@@ -128,14 +128,14 @@ export default async function SiteEventsPage({
         </select>
         <button
           type="submit"
-          style={{ padding: "0.45rem 0.9rem", borderRadius: 8, border: "1px solid #1a7f37", background: "#1a7f37", color: "#fff", fontSize: "0.95rem", cursor: "pointer" }}
+          style={{ padding: "0.45rem 1.1rem", borderRadius: 999, border: "none", background: "#1D1D1F", color: "#fff", fontSize: "0.95rem", fontWeight: 500, cursor: "pointer" }}
         >
           แสดง
         </button>
       </form>
 
       {events.length === 0 && (
-        <p style={{ color: "#667" }}>ไม่มีเหตุการณ์ในช่วงที่เลือก</p>
+        <p style={{ color: "#9E9E9E" }}>ไม่มีเหตุการณ์ในช่วงที่เลือก</p>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.7rem" }}>
@@ -149,8 +149,8 @@ export default async function SiteEventsPage({
               style={{
                 background: "#fff",
                 border: "1px solid #e3e5e8",
-                borderLeft: `5px solid ${isAlarm ? "#d9534f" : "#7fb3d8"}`,
-                borderRadius: 10,
+                borderLeft: isAlarm ? "5px solid #E5484D" : "1px solid #e3e5e8",
+                borderRadius: 16,
                 padding: "0.75rem 0.9rem",
                 display: "flex",
                 gap: "0.9rem",
@@ -171,12 +171,12 @@ export default async function SiteEventsPage({
               <div style={{ flex: 1, minWidth: 220 }}>
                 <div style={{ fontWeight: 700 }}>
                   {TYPE_TH[ev.event_type] ?? ev.event_type}
-                  <span style={{ fontWeight: 400, color: "#667", marginLeft: 8, fontSize: "0.85rem" }}>
+                  <span style={{ fontWeight: 400, color: "#9E9E9E", marginLeft: 8, fontSize: "0.85rem" }}>
                     {ev.cameras?.name ?? "ไม่ระบุกล้อง"} · {formatThaiTime(ev.occurred_at)}
                   </span>
                 </div>
                 {ev.ai?.description_th && (
-                  <div style={{ marginTop: 4, color: "#223" }}>🤖 {ev.ai.description_th}</div>
+                  <div style={{ marginTop: 4, color: "#1D1D1F" }}>🤖 {ev.ai.description_th}</div>
                 )}
                 {ev.ai?.verified === false && (
                   <div style={{ marginTop: 2, color: "#996", fontSize: "0.85rem" }}>
@@ -190,15 +190,15 @@ export default async function SiteEventsPage({
                   {feedback === "false_alarm" ? (
                     <span style={{ color: "#b06000", fontSize: "0.85rem" }}>✓ บันทึกว่าแจ้งเท็จแล้ว — ขอบคุณ ระบบจะฉลาดขึ้น</span>
                   ) : feedback === "confirmed" ? (
-                    <span style={{ color: "#1a7f37", fontSize: "0.85rem" }}>✓ ยืนยันว่าเป็นเหตุจริงแล้ว</span>
+                    <span style={{ color: "#009E4A", fontSize: "0.85rem" }}>✓ ยืนยันว่าเป็นเหตุจริงแล้ว</span>
                   ) : (
                     <form action={submitEventFeedback} style={{ display: "inline-flex", gap: "0.4rem" }}>
                       <input type="hidden" name="eventId" value={ev.event_id} />
                       <input type="hidden" name="siteId" value={siteId} />
-                      <button name="feedback" value="false_alarm" style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem", borderRadius: 8, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
+                      <button name="feedback" value="false_alarm" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
                         แจ้งเท็จ
                       </button>
-                      <button name="feedback" value="confirmed" style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem", borderRadius: 8, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
+                      <button name="feedback" value="confirmed" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
                         เหตุจริง
                       </button>
                     </form>

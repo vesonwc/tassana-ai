@@ -16,7 +16,7 @@ export default async function LoginPage({
         alignItems: "center",
         justifyContent: "center",
         padding: "1.5rem",
-        background: "#f6f7f8",
+        background: "#F4F5F6",
       }}
     >
       <form
@@ -26,7 +26,7 @@ export default async function LoginPage({
           maxWidth: 360,
           background: "#fff",
           border: "1px solid #e3e5e8",
-          borderRadius: 12,
+          borderRadius: 16,
           padding: "2rem 1.75rem",
           display: "flex",
           flexDirection: "column",
@@ -36,7 +36,7 @@ export default async function LoginPage({
         <div style={{ textAlign: "center", marginBottom: "0.5rem" }}>
           <div style={{ fontSize: "2rem" }}>📹</div>
           <h1 style={{ margin: "0.25rem 0 0", fontSize: "1.35rem" }}>Tassana AI</h1>
-          <p style={{ margin: 0, color: "#667", fontSize: "0.9rem" }}>
+          <p style={{ margin: 0, color: "#9E9E9E", fontSize: "0.9rem" }}>
             ระบบเฝ้าระวังอัจฉริยะ
           </p>
         </div>
@@ -46,7 +46,7 @@ export default async function LoginPage({
             style={{
               margin: 0,
               background: "#fdecec",
-              color: "#a33",
+              color: "#C0392B",
               padding: "0.5rem 0.75rem",
               borderRadius: 8,
               fontSize: "0.9rem",
@@ -56,7 +56,7 @@ export default async function LoginPage({
           </p>
         )}
 
-        <label style={{ fontSize: "0.9rem", color: "#334" }}>
+        <label style={{ fontSize: "0.9rem", color: "#1D1D1F" }}>
           อีเมล
           <input
             name="email"
@@ -76,7 +76,7 @@ export default async function LoginPage({
           />
         </label>
 
-        <label style={{ fontSize: "0.9rem", color: "#334" }}>
+        <label style={{ fontSize: "0.9rem", color: "#1D1D1F" }}>
           รหัสผ่าน
           <input
             name="password"
@@ -103,16 +103,16 @@ export default async function LoginPage({
             fontSize: "1rem",
             fontWeight: 600,
             color: "#fff",
-            background: "#1a7f37",
+            background: "#1D1D1F",
             border: "none",
-            borderRadius: 8,
+            borderRadius: 999,
             cursor: "pointer",
           }}
         >
           เข้าสู่ระบบ
         </button>
 
-        <p style={{ margin: 0, textAlign: "center", color: "#889", fontSize: "0.8rem" }}>
+        <p style={{ margin: 0, textAlign: "center", color: "#9E9E9E", fontSize: "0.8rem" }}>
           ยังไม่มีบัญชี? ติดต่อทีมงาน Tassana AI
         </p>
       </form>

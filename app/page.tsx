@@ -13,11 +13,11 @@ export default function HomePage() {
       }}
     >
       <h1 style={{ margin: 0 }}>Tassana AI</h1>
-      <p style={{ margin: 0, color: "#555" }}>
+      <p style={{ margin: 0, color: "#9E9E9E" }}>
         แพลตฟอร์มเฝ้าระวังอัจฉริยะ — รับ event จากกล้อง/NVR เดิม กรองด้วย AI
         แจ้งเตือนผ่าน LINE
       </p>
-      <p style={{ margin: 0, fontSize: "0.9rem", color: "#999" }}>
+      <p style={{ margin: 0, fontSize: "0.9rem", color: "#9E9E9E" }}>
         ระบบอยู่ระหว่างพัฒนา (MVP)
       </p>
       <a
@@ -25,9 +25,9 @@ export default function HomePage() {
         style={{
           marginTop: "0.75rem",
           padding: "0.6rem 1.5rem",
-          background: "#1a7f37",
+          background: "#1D1D1F",
           color: "#fff",
-          borderRadius: 8,
+          borderRadius: 999,
           textDecoration: "none",
           fontWeight: 600,
         }}

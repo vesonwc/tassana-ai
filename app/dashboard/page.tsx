@@ -17,13 +17,13 @@ function siteHealth(site: SiteRow): {
   bg: string;
 } {
   if (!site.heartbeat_at) {
-    return { label: "ยังไม่เชื่อมต่อกล้อง", color: "#667", bg: "#eef0f2" };
+    return { label: "ยังไม่เชื่อมต่อกล้อง", color: "#9E9E9E", bg: "#eef0f2" };
   }
   const silentMs = Date.now() - new Date(site.heartbeat_at).getTime();
   if (silentMs > OFFLINE_AFTER_MIN * 60_000) {
-    return { label: "ขาดการติดต่อ — ควรตรวจสอบ", color: "#a33", bg: "#fdecec" };
+    return { label: "ขาดการติดต่อ — ควรตรวจสอบ", color: "#C0392B", bg: "#FDECEC" };
   }
-  return { label: "ทำงานปกติ", color: "#1a7f37", bg: "#e9f7ee" };
+  return { label: "ทำงานปกติ", color: "#009E4A", bg: "rgba(0,222,104,0.12)" };
 }
 
 export default async function DashboardHome() {
@@ -51,12 +51,12 @@ export default async function DashboardHome() {
   return (
     <main>
       <h1 style={{ margin: "0 0 0.25rem", fontSize: "1.4rem" }}>โครงการของคุณ</h1>
-      <p style={{ margin: "0 0 1rem", color: "#667", fontSize: "0.9rem" }}>
+      <p style={{ margin: "0 0 1rem", color: "#9E9E9E", fontSize: "0.9rem" }}>
         แตะที่โครงการเพื่อดูเหตุการณ์
       </p>
 
       {sites.length === 0 && (
-        <p style={{ color: "#667" }}>
+        <p style={{ color: "#9E9E9E" }}>
           ยังไม่มีโครงการที่คุณเข้าถึงได้ — ติดต่อทีมงาน Tassana AI
         </p>
       )}
@@ -78,7 +78,7 @@ export default async function DashboardHome() {
                 display: "block",
                 background: "#fff",
                 border: "1px solid #e3e5e8",
-                borderRadius: 12,
+                borderRadius: 16,
                 padding: "1rem 1.1rem",
                 textDecoration: "none",
                 color: "inherit",
@@ -100,7 +100,7 @@ export default async function DashboardHome() {
               >
                 ● {health.label}
               </span>
-              <div style={{ marginTop: 10, color: "#334", fontSize: "0.9rem" }}>
+              <div style={{ marginTop: 10, color: "#1D1D1F", fontSize: "0.9rem" }}>
                 เหตุการณ์วันนี้: <strong>{counts[i]}</strong> รายการ
               </div>
             </Link>

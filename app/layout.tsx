@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Anuphan } from "next/font/google";
+
+const anuphan = Anuphan({
+  subsets: ["thai", "latin"],
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
   title: "Tassana AI — แพลตฟอร์มเฝ้าระวังอัจฉริยะ",
@@ -10,7 +16,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="th">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0 }}>
+      <body className={anuphan.className} style={{ margin: 0, color: "#1D1D1F" }}>
         {children}
       </body>
     </html>

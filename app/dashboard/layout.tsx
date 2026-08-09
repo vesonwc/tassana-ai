@@ -15,7 +15,7 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f6f7f8" }}>
+    <div style={{ minHeight: "100vh", background: "#F4F5F6" }}>
       <header
         style={{
           background: "#fff",
@@ -28,20 +28,20 @@ export default async function DashboardLayout({
       >
         <Link
           href="/dashboard"
-          style={{ fontWeight: 700, fontSize: "1.05rem", color: "#123", textDecoration: "none" }}
+          style={{ fontWeight: 700, fontSize: "1.05rem", color: "#1D1D1F", textDecoration: "none" }}
         >
           📹 Tassana AI
         </Link>
-        <span style={{ marginLeft: "auto", color: "#667", fontSize: "0.85rem" }}>
+        <span style={{ marginLeft: "auto", color: "#9E9E9E", fontSize: "0.85rem" }}>
           {session.profile.display_name ?? session.user.email}
         </span>
         <form action={signOut} style={{ margin: 0 }}>
           <button
             style={{
               fontSize: "0.85rem",
-              padding: "0.35rem 0.75rem",
+              padding: "0.35rem 0.9rem",
+              borderRadius: 999,
               border: "1px solid #ccd0d5",
-              borderRadius: 8,
               background: "#fff",
               cursor: "pointer",
             }}
