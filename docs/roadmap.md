@@ -37,9 +37,10 @@
 - [x] `worker/index.ts` pipeline: pgmq → โหลด snapshot จาก Storage → Gemini → update events.ai; fail-open: ล้มเกิน 3 ครั้ง → ปล่อย event ดิบ + ack
 - [x] `worker/agent/capture.ts` PC agent: ffmpeg จับเฟรม Pocket 3 → ตรวจ motion (pixel diff) → อัปโหลดภาพ + ยิง webhook (`npm run agent:pocket3`)
 - [x] Manual adapter (`lib/normalizers/manual.ts`) + test รวม 22 ข้อผ่าน; bucket `snapshots` + กล้อง pocket3 สร้างแล้ว
-- [ ] รัน `supabase/migrations/20260809000002_worker_queue.sql` ใน SQL Editor (dequeue/ack functions)
-- [ ] ใส่ GEMINI_API_KEY ใน .env → ทดสอบ E2E: agent เห็น motion → AI บรรยายไทยขึ้นหน้าเว็บ
-- [ ] Deploy worker ขึ้น Railway (หลังทดสอบ local ผ่าน)
+- [x] รัน migration 0002 (dequeue/ack) + GEMINI_API_KEY (key รูปแบบใหม่ `AQ.` ใช้ได้; model = `gemini-flash-latest` กันรุ่นถูกปิด)
+- [x] **E2E ผ่านครั้งแรก 2026-08-09 14:42** — กล้องโน้ตบุ๊ก (Pocket 3 รอสายข้อมูล): motion → upload → webhook → คิว → Gemini → "พบชายสวมแว่นตากำลังดื่มน้ำจากแก้ว..." ขึ้นหน้า /admin; retry อัตโนมัติพิสูจน์แล้ว (event แรกล้มเพราะชื่อรุ่น → คิวส่งซ้ำ → สำเร็จ ไม่มี event หาย)
+- [ ] สลับ agent เป็น Pocket 3 เมื่อได้สาย USB-C แบบข้อมูล
+- [ ] Deploy worker ขึ้น Railway (ตอนนี้รัน local)
 - **เสร็จเมื่อ:** ทดสอบชุดภาพจริง 20-30 ภาพ (คน/หมา/เงา/ฝน) แล้วบันทึกผล % ความถูกต้องลงไฟล์นี้
 
 ## M4 — Dashboard [สถานะ: ยังไม่เริ่ม]

@@ -65,7 +65,7 @@ export async function analyzeSnapshot(
 ): Promise<VlmAnalysis> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new VlmError("GEMINI_API_KEY is not set");
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 
   let response: Response;
   try {
