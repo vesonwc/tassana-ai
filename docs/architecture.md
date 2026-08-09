@@ -1,0 +1,54 @@
+# สถาปัตยกรรมระบบ
+
+## หลักการใหญ่ข้อเดียว
+
+**ทุกอย่างเป็น event** — ไม่ว่าต้นทางจะเป็นกล้อง AI, NVR, หรือกล่อง Frigate
+ทุกแหล่งต้องถูกแปลงเป็น NormalizedEvent (ดู event-schema.md) ที่ประตูทางเข้า
+หลังจากนั้นระบบข้างในไม่รู้และไม่สนว่าไซต์ไหนใช้โหมดอะไร
+
+## สองโหมดการเชื่อมไซต์
+
+### โหมด A — ไร้กล่อง (ค่าเริ่มต้น, friction ต่ำสุด)
+- ใช้ AI ในตัวกล้อง/NVR (Hikvision Smart Event ผ่าน ISAPI, Dahua IVS, ONVIF Events)
+- NVR ยิง HTTP callback มาที่ `POST /api/webhook/[siteKey]` บน Vercel
+- เหมาะกับ: กล้องผลิตหลัง ~2020, เน็ตไซต์เสถียรพอควร
+- จุดอ่อน: เน็ตหลุด = ตาบอด (heartbeat ต้องจับให้ได้), คุณภาพ detection ขึ้นกับกล้อง
+
+### โหมด B — มีกล่อง Edge (upsell)
+- Mini PC + Frigate ที่ไซต์ ดึง RTSP จาก NVR, ตรวจจับด้วย YOLO
+- Frigate ส่ง event ผ่าน MQTT → worker subscribe → แปลงเป็น NormalizedEvent
+- เหมาะกับ: กล้องเก่า, เน็ตห่วย, ต้องการ LPR แม่น/นับคน/ฟีเจอร์ที่กล้องทำไม่ได้
+- ข้อดี: เน็ตหลุดยังตรวจจับและอัดต่อได้, buffer event ส่งย้อนหลัง
+
+## เส้นทางข้อมูล (data flow)
+
+```
+[กล้อง/NVR/Frigate]
+   → Event Gateway (Next.js API route หรือ worker MQTT listener)
+   → normalize เป็น NormalizedEvent → insert ตาราง events
+   → enqueue งานเข้า pgmq
+   → Worker: ดึง snapshot/คลิป → เรียก Gemini กรอง+บรรยายไทย
+   → update events.ai → สร้าง alert → ส่ง LINE
+   → (cron 06:00) Claude สรุปรายงานวัน → PDF → ส่ง LINE นิติ
+```
+
+## ความปลอดภัยการเชื่อมไซต์
+
+- **ห้าม port forward NVR ออก internet เด็ดขาด** — NVR เปิดพอร์ตสาธารณะโดนสแกนแฮ็กในไม่กี่วัน
+- ใช้ Tailscale: ติดตั้งที่เครื่องในไซต์ (หรือ NVR ที่ลงได้) ให้เชื่อม **ออก** หาเครือข่ายเราแบบ outbound-only
+- webhook ทุกไซต์มี `siteKey` ลับเฉพาะไซต์ใน URL + ตรวจ payload signature ถ้าอุปกรณ์รองรับ
+- NVR เก่าที่ยิงได้แค่ HTTP (ไม่มี HTTPS): ให้ worker เปิด endpoint รับผ่าน Tailscale แทน Vercel
+
+## ความทนทาน (ออกแบบไว้ตั้งแต่วันแรก)
+
+1. **Heartbeat** — ทุกไซต์/กล้องต้องมีสัญญาณชีพ ถ้าเงียบเกิน threshold (default 10 นาที) → สร้าง event `camera_offline` และแจ้งทั้งเราและลูกค้า
+   ("ลูกค้าให้อภัยเน็ตหลุด แต่ไม่ให้อภัยการที่ไม่มีใครรู้ว่ามันหลุด")
+2. **Reconciliation** — worker เทียบจำนวน event ฝั่งต้นทางกับที่เราได้รับ (สำหรับอุปกรณ์ที่ query ย้อนหลังได้) หา event ที่หายกลางทาง
+3. **Fail-open** — VLM ล่ม/ช้า → ส่ง alert ดิบทันที ไม่รอ
+4. **Idempotency** — event ซ้ำ (raw_id เดิมจาก source เดิม) ต้องไม่สร้าง alert ซ้ำ
+
+## ทางออกที่เตรียมไว้ (exit doors — ยังไม่ทำจนกว่าจะถึง trigger)
+
+- Supabase Storage → Cloudflare R2: เมื่อค่า egress มีนัยยะ (S3-compatible ทั้งคู่ เปลี่ยนไม่กี่บรรทัด)
+- Vercel/Supabase → self-host: เมื่อ 30-50+ ไซต์และบิลเกินหลักหมื่น/เดือน (Postgres dump ย้ายได้ใน 1 วัน)
+- เพิ่ม Python service: เฉพาะเมื่อมีงาน vision หนักที่ต้องรันเอง (ลูกค้าโรงงาน ฯลฯ)
