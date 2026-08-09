@@ -21,3 +21,7 @@ next-env.d.ts
 
 # supabase local
 supabase/.temp/
+
+# starter docs (duplicated into docs/) + Office temp files
+startup/
+~$*
