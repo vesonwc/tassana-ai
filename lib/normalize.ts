@@ -5,6 +5,10 @@ import {
   normalizeHikvisionEvent,
   type NormalizeContext,
 } from "@/lib/normalizers/hikvision";
+import {
+  extractManualCameraRef,
+  normalizeManualEvent,
+} from "@/lib/normalizers/manual";
 
 // Every payload entering the system goes through here (rule #1 in CLAUDE.md).
 // M1 supports hikvision_isapi only; other adapters are added per milestone.
@@ -34,6 +38,9 @@ export function extractCameraRef(
 ): string | null {
   if (sourceType === "hikvision_isapi") {
     return extractHikvisionCameraRef(payload);
+  }
+  if (sourceType === "manual") {
+    return extractManualCameraRef(payload);
   }
   return null;
 }
@@ -68,6 +75,8 @@ export function normalizeEvent(
   switch (sourceType) {
     case "hikvision_isapi":
       return normalizeHikvisionEvent(payload, ctx);
+    case "manual":
+      return normalizeManualEvent(payload, ctx);
     default:
       return normalizeUnknown(payload, ctx);
   }

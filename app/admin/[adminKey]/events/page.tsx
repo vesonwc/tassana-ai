@@ -26,6 +26,11 @@ interface EventRow {
   source_type: string;
   occurred_at: string;
   detection: { zone: string | null; plate: string | null } | null;
+  ai: {
+    verified: boolean | null;
+    severity: string | null;
+    description_th: string | null;
+  } | null;
   raw: Record<string, unknown>;
   cameras: { name: string } | null;
   sites: { name: string } | null;
@@ -55,7 +60,7 @@ export default async function AdminEventsPage({
   const { data, error } = await supabase
     .from("events")
     .select(
-      "event_id, event_type, source_type, occurred_at, detection, raw, cameras(name), sites(name)",
+      "event_id, event_type, source_type, occurred_at, detection, ai, raw, cameras(name), sites(name)",
     )
     .order("occurred_at", { ascending: false })
     .limit(50);
@@ -93,6 +98,16 @@ export default async function AdminEventsPage({
             >
               <strong>{TYPE_TH[ev.event_type] ?? ev.event_type}</strong>
               <span>{ev.cameras?.name ?? "ไม่ระบุกล้อง"}</span>
+              {ev.ai?.verified === false && (
+                <span style={{ color: "#999", fontSize: "0.85rem" }}>
+                  AI: น่าจะแจ้งเตือนหลอก
+                </span>
+              )}
+              {ev.ai?.description_th && (
+                <span style={{ flexBasis: "100%", color: "#333" }}>
+                  🤖 {ev.ai.description_th}
+                </span>
+              )}
               {ev.detection?.zone && <span>โซน: {ev.detection.zone}</span>}
               {ev.detection?.plate && <span>ทะเบียน: {ev.detection.plate}</span>}
               <span style={{ color: "#777", fontSize: "0.85rem" }}>

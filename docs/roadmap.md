@@ -31,10 +31,15 @@
 - **เสร็จเมื่อ:** curl ยิง event ปลอม → LINE กลุ่มทดสอบเด้งใน < 10 วินาที
 - *ถึงจุดนี้ = เดโม่ให้คนดูได้แล้ว*
 
-## M3 — Worker + VLM [สถานะ: ยังไม่เริ่ม]
-- Deploy worker ขึ้น Railway
-- Pipeline: อ่านคิว → โหลด snapshot → เรียก Gemini (กรองจริง/หลอก + severity + คำบรรยายไทย) → update events.ai → ส่ง/อัปเดต LINE
-- Fail-open: VLM timeout 20 วิ → ส่ง alert ดิบทันที
+## M3 — Worker + VLM [สถานะ: โค้ดเสร็จ 2026-08-09 — รอ GEMINI_API_KEY + รัน SQL migration 0002 + ทดสอบจริง]
+- แผนปรับ: ใช้ DJI Pocket 3 (โหมดเว็บแคม) + PC agent เป็นกล้องทดสอบแทนกล้อง CCTV จริงไปก่อน (กล้องบ้านเจ้าของเป็น LifeSmart ระบบปิด ต่อไม่ได้); worker รัน local ก่อน ค่อย deploy Railway
+- [x] `lib/vlm.ts` Gemini client (REST, timeout 20 วิ, ตอบ JSON: verified/severity/description_th/label)
+- [x] `worker/index.ts` pipeline: pgmq → โหลด snapshot จาก Storage → Gemini → update events.ai; fail-open: ล้มเกิน 3 ครั้ง → ปล่อย event ดิบ + ack
+- [x] `worker/agent/capture.ts` PC agent: ffmpeg จับเฟรม Pocket 3 → ตรวจ motion (pixel diff) → อัปโหลดภาพ + ยิง webhook (`npm run agent:pocket3`)
+- [x] Manual adapter (`lib/normalizers/manual.ts`) + test รวม 22 ข้อผ่าน; bucket `snapshots` + กล้อง pocket3 สร้างแล้ว
+- [ ] รัน `supabase/migrations/20260809000002_worker_queue.sql` ใน SQL Editor (dequeue/ack functions)
+- [ ] ใส่ GEMINI_API_KEY ใน .env → ทดสอบ E2E: agent เห็น motion → AI บรรยายไทยขึ้นหน้าเว็บ
+- [ ] Deploy worker ขึ้น Railway (หลังทดสอบ local ผ่าน)
 - **เสร็จเมื่อ:** ทดสอบชุดภาพจริง 20-30 ภาพ (คน/หมา/เงา/ฝน) แล้วบันทึกผล % ความถูกต้องลงไฟล์นี้
 
 ## M4 — Dashboard [สถานะ: ยังไม่เริ่ม]
