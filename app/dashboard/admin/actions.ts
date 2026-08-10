@@ -43,6 +43,20 @@ export async function rotateSiteKey(formData: FormData): Promise<void> {
   revalidatePath(`/dashboard/sites/${siteId}/settings`);
 }
 
+export async function saveLineTarget(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const siteId = String(formData.get("siteId") ?? "");
+  const target = String(formData.get("lineTarget") ?? "").trim();
+  if (!siteId) return;
+  const service = getServiceClient();
+  await service
+    .from("sites")
+    .update({ line_group_id: target || null })
+    .eq("id", siteId);
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=connect&saved=1`);
+}
+
 export interface CreateUserState {
   error?: string;
   email?: string;

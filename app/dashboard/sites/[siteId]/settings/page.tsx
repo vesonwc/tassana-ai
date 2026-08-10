@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getSessionClient, getUserAndProfile } from "@/lib/supabase-auth";
 import { formatThaiTime } from "@/lib/labels";
 import { saveCameraConfig, saveSiteRules } from "./actions";
-import { rotateSiteKey } from "@/app/dashboard/admin/actions";
+import { rotateSiteKey, saveLineTarget } from "@/app/dashboard/admin/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -97,10 +97,20 @@ export default async function SiteSettingsPage({
   const supabase = await getSessionClient();
   const { data: site } = await supabase
     .from("sites")
-    .select("id, name, rules, custom_instructions_th, site_key")
+    .select("id, name, rules, custom_instructions_th, site_key, line_group_id")
     .eq("id", siteId)
     .maybeSingle();
   if (!site) notFound();
+
+  let lineLastSource: { id: string; type: string } | null = null;
+  if (isAdmin && tab === "connect") {
+    const { data: status } = await supabase
+      .from("system_status")
+      .select("value")
+      .eq("key", "line_last_source")
+      .maybeSingle();
+    lineLastSource = (status?.value as { id: string; type: string } | null) ?? null;
+  }
 
   const { data: cameraRows } = await supabase
     .from("cameras")
@@ -279,7 +289,31 @@ export default async function SiteSettingsPage({
           </section>
 
           <section style={box}>
-            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>3. กล้องที่ระบบรู้จัก ({cameras.length} ตัว)</h2>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>3. ปลายทาง LINE ของโครงการนี้</h2>
+            <p style={{ margin: "0 0 0.5rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+              ใส่ User ID (ขึ้นต้น U) หรือ Group ID (ขึ้นต้น C) ที่จะรับแจ้งเตือน — วิธีหา Group ID: เชิญบอทเข้ากลุ่ม แล้วพิมพ์ข้อความอะไรก็ได้ 1 ครั้ง ID จะโผล่ด้านล่างนี้
+            </p>
+            {lineLastSource && (
+              <p style={{ margin: "0 0 0.5rem", fontSize: "0.85rem", background: "#F4F5F6", borderRadius: 8, padding: "0.5rem 0.7rem" }}>
+                ID ล่าสุดที่บอทเห็น ({lineLastSource.type}): <code style={{ userSelect: "all" }}>{lineLastSource.id}</code>
+              </p>
+            )}
+            <form action={saveLineTarget} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <input type="hidden" name="siteId" value={siteId} />
+              <input
+                name="lineTarget"
+                defaultValue={site.line_group_id ?? ""}
+                placeholder="Uxxxxxxxx... หรือ Cxxxxxxxx..."
+                style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+              />
+              <button style={{ padding: "0.5rem 1.2rem", borderRadius: 999, border: "none", background: "#1D1D1F", color: "#fff", fontSize: "0.9rem", fontWeight: 600, cursor: "pointer" }}>
+                บันทึกปลายทาง
+              </button>
+            </form>
+          </section>
+
+          <section style={box}>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>4. กล้องที่ระบบรู้จัก ({cameras.length} ตัว)</h2>
             <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
               กล้องใหม่โผล่ที่นี่เองเมื่อยิง event แรก (สถานะปิดไว้ก่อน) — เปิดใช้ได้ในแท็บ 📷
             </p>

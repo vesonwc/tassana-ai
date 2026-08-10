@@ -7,7 +7,9 @@ import {
   type SnapshotContext,
   type VlmAnalysis,
 } from "../lib/vlm";
-import type { AiResult } from "../lib/types";
+import type { AiResult, EventType, Severity } from "../lib/types";
+import { buildAlertFlex, buildDailyReportText, pushLineMessage } from "../lib/line";
+import { TYPE_TH } from "../lib/labels";
 
 // Queue worker (M3): pgmq "events" → load snapshot → Gemini → update events.ai.
 // Fail-open (ADR-005): VLM timeout/failure never blocks the pipeline — the
@@ -45,9 +47,18 @@ interface QueueMessage {
   message: { event_id?: string };
 }
 
+interface SiteRules {
+  strict_hours?: { start: string; end: string };
+  alerts?: Record<string, boolean>;
+  sensitivity?: string;
+  retention_days?: number;
+}
+
 interface EventRow {
   event_id: string;
+  site_id: string;
   event_type: string;
+  occurred_at: string;
   media: { snapshot_path: string | null };
   ai: AiResult;
   cameras: {
@@ -58,9 +69,20 @@ interface EventRow {
   } | null;
   sites: {
     name: string;
+    line_group_id: string | null;
     custom_instructions_th: string | null;
-    rules: { strict_hours?: { start: string; end: string } } | null;
+    rules: SiteRules | null;
   } | null;
+}
+
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://tassana-ai.vercel.app";
+
+// sensitivity (ADR-010 rules) → minimum severity that reaches LINE.
+function severityPasses(sensitivity: string | undefined, severity: Severity): boolean {
+  if (sensitivity === "low") return severity === "critical";
+  if (sensitivity === "high") return true;
+  return severity === "critical" || severity === "warning";
 }
 
 function bangkokNowHHmm(): string {
@@ -150,7 +172,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "event_id, event_type, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, custom_instructions_th, rules)",
+      "event_id, site_id, event_type, occurred_at, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, line_group_id, custom_instructions_th, rules)",
     )
     .eq("event_id", eventId)
     .maybeSingle();
@@ -193,6 +215,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
       console.log(
         `worker: ${eventId} → ${analysis.verified ? "จริง" : "หลอก"} [${analysis.severity}] ${analysis.description_th}`,
       );
+      await maybeSendLineAlert(row, analysis);
     } else {
       // No snapshot to analyze — still stamp processed_at so reconciliation
       // knows this event is settled and never re-enqueues it.
@@ -376,6 +399,158 @@ async function sweepRetention(): Promise<void> {
   }
 }
 
+// M2: the bell. Verified abnormal events, filtered by the site's own rules,
+// reach LINE within seconds — everything else stays on the dashboard (ADR-006).
+async function maybeSendLineAlert(
+  row: EventRow,
+  analysis: VlmAnalysis,
+): Promise<void> {
+  try {
+    const to = row.sites?.line_group_id;
+    if (!to || !process.env.LINE_CHANNEL_ACCESS_TOKEN) return;
+    if (!analysis.verified) return;
+    const rules = row.sites?.rules ?? {};
+    if (rules.alerts?.[row.event_type] === false) return;
+    if (!severityPasses(rules.sensitivity, analysis.severity)) return;
+
+    let imageUrl: string | null = null;
+    if (row.media?.snapshot_path) {
+      const { data: signed } = await supabase.storage
+        .from("snapshots")
+        .createSignedUrl(row.media.snapshot_path, 86_400);
+      imageUrl = signed?.signedUrl ?? null;
+    }
+
+    const timeTh = new Date(row.occurred_at).toLocaleTimeString("th-TH", {
+      timeZone: "Asia/Bangkok",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const flex = buildAlertFlex({
+      severity: analysis.severity,
+      eventTypeTh: TYPE_TH[row.event_type as EventType] ?? row.event_type,
+      descriptionTh: analysis.description_th || "ตรวจพบเหตุการณ์",
+      cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
+      siteName: row.sites?.name ?? "",
+      timeTh: `${timeTh} น.`,
+      imageUrl,
+      dashboardUrl: `${APP_URL}/dashboard/sites/${row.site_id}`,
+    });
+
+    const result = await pushLineMessage(to, [flex]);
+    if (result.ok) {
+      await supabase.from("alerts").insert({
+        event_id: row.event_id,
+        channel: "line",
+        sent_at: new Date().toISOString(),
+      });
+      console.log(`worker: 🔔 LINE alert sent for ${row.event_id}`);
+    } else {
+      console.error(`worker: LINE send failed for ${row.event_id}: ${result.error}`);
+    }
+  } catch (err) {
+    // Alerting must never break the analysis pipeline.
+    console.error("worker: LINE alert error", (err as Error).message);
+  }
+}
+
+// M2/M5: daily report at 06:00 Bangkok — idempotent via the reports table.
+function bangkokDateString(daysAgo: number): string {
+  const d = new Date(Date.now() - daysAgo * 86_400_000);
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+}
+
+async function maybeSendDailyReports(): Promise<void> {
+  const nowHHmm = bangkokNowHHmm();
+  if (nowHHmm < "06:00" || nowHHmm > "06:15") return; // 15-min window, guarded by reports row
+
+  const reportDate = bangkokDateString(1); // yesterday, Bangkok
+  const { data: sites } = await supabase
+    .from("sites")
+    .select("id, name, line_group_id")
+    .not("line_group_id", "is", null);
+
+  for (const site of sites ?? []) {
+    const { data: existing } = await supabase
+      .from("reports")
+      .select("id")
+      .eq("site_id", site.id)
+      .eq("report_date", reportDate)
+      .eq("period", "daily")
+      .maybeSingle();
+    if (existing) continue;
+
+    const dayStart = new Date(`${reportDate}T00:00:00+07:00`).toISOString();
+    const dayEnd = new Date(`${bangkokDateString(0)}T00:00:00+07:00`).toISOString();
+    const { data: events } = await supabase
+      .from("events")
+      .select("event_type, occurred_at, ai, cameras(name)")
+      .eq("site_id", site.id)
+      .gte("occurred_at", dayStart)
+      .lt("occurred_at", dayEnd)
+      .limit(2000);
+
+    const rows = (events ?? []) as unknown as {
+      event_type: string;
+      occurred_at: string;
+      ai: { verified: boolean | null; severity: string | null; description_th: string | null } | null;
+      cameras: { name: string } | null;
+    }[];
+    const abnormal = rows.filter(
+      (r) =>
+        r.ai?.verified === true &&
+        (r.ai.severity === "warning" || r.ai.severity === "critical"),
+    );
+    const vehicles = rows.filter(
+      (r) => r.event_type === "vehicle_detected" || r.event_type === "lpr",
+    ).length;
+    const offline = rows.filter((r) => r.event_type === "camera_offline").length;
+
+    const stats = {
+      total: rows.length,
+      abnormal: abnormal.length,
+      vehicles,
+      offline_incidents: offline,
+    };
+    const text = buildDailyReportText({
+      siteName: site.name,
+      dateTh: new Date(`${reportDate}T12:00:00+07:00`).toLocaleDateString("th-TH", {
+        timeZone: "Asia/Bangkok",
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+      }),
+      total: rows.length,
+      abnormalLines: abnormal.slice(0, 5).map((r) => {
+        const t = new Date(r.occurred_at).toLocaleTimeString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        return `${t} ${r.ai?.description_th ?? r.event_type} (${r.cameras?.name ?? ""})`;
+      }),
+      vehicles,
+      camerasOnline: "ครบทุกตัว",
+      offlineIncidents: offline,
+      reportUrl: `${APP_URL}/dashboard/sites/${site.id}/report`,
+    });
+
+    const result = await pushLineMessage(site.line_group_id as string, [
+      { type: "text", text },
+    ]);
+    await supabase.from("reports").insert({
+      site_id: site.id,
+      report_date: reportDate,
+      period: "daily",
+      stats,
+      sent_at: result.ok ? new Date().toISOString() : null,
+    });
+    console.log(
+      `worker: ☀️ daily report "${site.name}" ${reportDate} — ${result.ok ? "sent" : `failed: ${result.error}`}`,
+    );
+  }
+}
+
 // ADR-012: dead-man switch — the dashboard warns admins if this pulse stops.
 async function pulseSystemStatus(): Promise<void> {
   const { error } = await supabase.from("system_status").upsert({
@@ -427,6 +602,8 @@ async function main(): Promise<void> {
   setInterval(() => void sweepRetention(), RETENTION_SWEEP_MS);
   void pulseSystemStatus();
   setInterval(() => void pulseSystemStatus(), 60_000);
+  void maybeSendDailyReports();
+  setInterval(() => void maybeSendDailyReports(), 60_000);
   for (;;) {
     try {
       const { data, error } = await supabase.rpc("dequeue_events", {
