@@ -2,7 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 import { v7 as uuidv7 } from "uuid";
 import {
   analyzeSnapshot,
+  VlmRateLimitError,
   VlmTimeoutError,
+  type SnapshotContext,
   type VlmAnalysis,
 } from "../lib/vlm";
 import type { AiResult } from "../lib/types";
@@ -19,7 +21,13 @@ try {
 }
 
 const POLL_INTERVAL_MS = 3_000;
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 5;
+// Free-tier Gemini allows ~10 requests/min — space calls out so queue bursts
+// (several cameras firing at once) do not trip 429s.
+const VLM_MIN_INTERVAL_MS = Number(process.env.VLM_MIN_INTERVAL_MS ?? 7_000);
+// Separate model = separate free-tier quota bucket; used when primary is 429ing.
+const VLM_FALLBACK_MODEL =
+  process.env.GEMINI_FALLBACK_MODEL ?? "gemini-flash-lite-latest";
 const HEARTBEAT_CHECK_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MIN = Number(process.env.HEARTBEAT_TIMEOUT_MIN ?? 10);
 
@@ -63,6 +71,29 @@ async function updateAi(eventId: string, ai: AiResult): Promise<void> {
   if (error) throw new Error(`update ai failed: ${error.message}`);
 }
 
+let lastVlmCallAt = 0;
+async function vlmThrottle(): Promise<void> {
+  const wait = lastVlmCallAt + VLM_MIN_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastVlmCallAt = Date.now();
+}
+
+async function analyzeWithFallback(
+  base64: string,
+  mime: string,
+  ctx: SnapshotContext,
+): Promise<VlmAnalysis> {
+  await vlmThrottle();
+  try {
+    return await analyzeSnapshot(base64, mime, ctx);
+  } catch (err) {
+    if (!(err instanceof VlmRateLimitError)) throw err;
+    console.warn(`worker: primary model rate-limited, trying ${VLM_FALLBACK_MODEL}`);
+    await vlmThrottle();
+    return analyzeSnapshot(base64, mime, ctx, VLM_FALLBACK_MODEL);
+  }
+}
+
 async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
   const snapshotPath = row.media?.snapshot_path;
   if (!snapshotPath) {
@@ -77,7 +108,7 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
   }
   const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
   const mime = blob.type || "image/jpeg";
-  return analyzeSnapshot(base64, mime, {
+  return analyzeWithFallback(base64, mime, {
     eventType: row.event_type,
     cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
     siteName: row.sites?.name ?? "ไม่ระบุไซต์",

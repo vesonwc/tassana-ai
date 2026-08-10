@@ -16,6 +16,7 @@ export interface VlmAnalysis {
 
 export class VlmError extends Error {}
 export class VlmTimeoutError extends VlmError {}
+export class VlmRateLimitError extends VlmError {}
 
 export interface SnapshotContext {
   eventType: string;
@@ -62,10 +63,12 @@ export async function analyzeSnapshot(
   imageBase64: string,
   mimeType: string,
   ctx: SnapshotContext,
+  modelOverride?: string,
 ): Promise<VlmAnalysis> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new VlmError("GEMINI_API_KEY is not set");
-  const model = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
+  const model =
+    modelOverride ?? process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 
   let response: Response;
   try {
@@ -103,6 +106,10 @@ export async function analyzeSnapshot(
 
   if (!response.ok) {
     const body = await response.text();
+    if (response.status === 429) {
+      // Free-tier RPM/TPM throttle — caller may fall back to another model.
+      throw new VlmRateLimitError(`VLM rate limited: ${body.slice(0, 200)}`);
+    }
     throw new VlmError(`VLM HTTP ${response.status}: ${body.slice(0, 300)}`);
   }
 

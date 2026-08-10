@@ -4,7 +4,7 @@ import { getSessionClient } from "@/lib/supabase-auth";
 import { getServiceClient } from "@/lib/supabase";
 import { ALARM_TYPES, formatThaiTime, TYPE_TH } from "@/lib/labels";
 import type { EventType } from "@/lib/types";
-import { submitEventFeedback } from "./actions";
+import { reanalyzeEvent, submitEventFeedback } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,12 @@ interface EventRow {
   occurred_at: string;
   detection: { zone: string | null; plate: string | null } | null;
   media: { snapshot_path: string | null } | null;
-  ai: { verified: boolean | null; severity: string | null; description_th: string | null } | null;
+  ai: {
+    verified: boolean | null;
+    severity: string | null;
+    description_th: string | null;
+    processed_at: string | null;
+  } | null;
   cameras: { name: string } | null;
   alerts: { feedback: string | null }[];
 }
@@ -183,6 +188,25 @@ export default async function SiteEventsPage({
                 </div>
                 {ev.ai?.description_th && (
                   <div style={{ marginTop: 4, color: "#1D1D1F" }}>🤖 {ev.ai.description_th}</div>
+                )}
+                {!ev.ai?.description_th && !ev.ai?.processed_at && (
+                  <div style={{ marginTop: 4, color: "#9E9E9E", fontSize: "0.85rem" }}>
+                    ⏳ กำลังวิเคราะห์ภาพ... (รีเฟรชหน้าเพื่อดูผล)
+                  </div>
+                )}
+                {!ev.ai?.description_th && ev.ai?.processed_at && (
+                  <form action={reanalyzeEvent} style={{ marginTop: 4 }}>
+                    <input type="hidden" name="eventId" value={ev.event_id} />
+                    <input type="hidden" name="siteId" value={siteId} />
+                    <span style={{ color: "#9E9E9E", fontSize: "0.85rem", marginRight: 8 }}>
+                      วิเคราะห์ภาพไม่สำเร็จ
+                    </span>
+                    <button
+                      style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}
+                    >
+                      🔄 วิเคราะห์อีกครั้ง
+                    </button>
+                  </form>
                 )}
                 {ev.ai?.verified === false && (
                   <div style={{ marginTop: 2, color: "#996", fontSize: "0.85rem" }}>

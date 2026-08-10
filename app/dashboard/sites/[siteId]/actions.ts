@@ -45,3 +45,36 @@ export async function submitEventFeedback(formData: FormData): Promise<void> {
 
   revalidatePath(`/dashboard/sites/${siteId}`);
 }
+
+// Manual retry for events whose analysis failed (fail-open, ADR-005): reset
+// the ai block and push the event back onto the queue.
+export async function reanalyzeEvent(formData: FormData): Promise<void> {
+  const eventId = String(formData.get("eventId") ?? "");
+  const siteId = String(formData.get("siteId") ?? "");
+  if (!eventId) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("events")
+    .select("event_id")
+    .eq("event_id", eventId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const service = getServiceClient();
+  await service
+    .from("events")
+    .update({
+      ai: {
+        verified: null,
+        severity: null,
+        description_th: null,
+        model: null,
+        processed_at: null,
+      },
+    })
+    .eq("event_id", eventId);
+  await service.rpc("enqueue_event", { p_event_id: eventId });
+
+  revalidatePath(`/dashboard/sites/${siteId}`);
+}
