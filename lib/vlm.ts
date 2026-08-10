@@ -22,19 +22,84 @@ export interface SnapshotContext {
   eventType: string;
   cameraName: string;
   siteName: string;
+  // Layer 2 (ADR-011): role profile of this camera — a database row, not code.
+  profileName?: string | null;
+  profilePrompt?: string | null;
+  // Layer 3 (ADR-011): plain-Thai instructions typed by admins/customers.
+  siteInstructions?: string | null;
+  cameraInstructions?: string | null;
+  // Schedule context: the same rule at 2 AM and 2 PM should not sound the same.
+  strictHours?: { start: string; end: string } | null;
+  nowBangkok?: string; // "HH:mm", injectable for tests
 }
 
-function buildPrompt(ctx: SnapshotContext): string {
-  return [
+// Layer 1 (ADR-011): universal watch list. Every camera, cannot be disabled.
+const BASE_WATCH_TH = [
+  "กล้องถูกบัง ถูกหันทิศผิดไป หรือภาพมืด/เบลอผิดปกติ (คนร้ายมักจัดการกล้องก่อน)",
+  "คนล้มแล้วไม่ลุก หรือท่าทางบาดเจ็บ/หมดสติ",
+  "ควันหรือเปลวไฟ",
+  "การชุลมุน ทะเลาะวิวาท หรือทำร้ายร่างกาย",
+  "รถชนหรืออุบัติเหตุ",
+].join(", ");
+
+export function isWithinStrictHours(
+  now: string,
+  start: string,
+  end: string,
+): boolean {
+  // Overnight windows (e.g. 22:00–06:00) wrap past midnight.
+  if (start <= end) return now >= start && now < end;
+  return now >= start || now < end;
+}
+
+export function buildPrompt(ctx: SnapshotContext): string {
+  const lines = [
     "คุณเป็นผู้ช่วยเจ้าหน้าที่รักษาความปลอดภัยหมู่บ้าน/คอนโดในประเทศไทย",
     `ภาพนี้มาจากกล้อง "${ctx.cameraName}" ของ "${ctx.siteName}" ระบบตรวจจับแจ้งประเภทเหตุการณ์เบื้องต้นว่า "${ctx.eventType}"`,
+    `สิ่งที่ต้องเฝ้าระวังเสมอไม่ว่ากล้องทำหน้าที่อะไร (พบเมื่อไหร่ให้ verified=true และ severity อย่างน้อย warning): ${BASE_WATCH_TH}`,
+  ];
+
+  if (ctx.profilePrompt) {
+    lines.push(
+      `หน้าที่เฉพาะของกล้องนี้${ctx.profileName ? ` (${ctx.profileName})` : ""}: ${ctx.profilePrompt}`,
+    );
+  }
+
+  if (ctx.nowBangkok) {
+    if (ctx.strictHours) {
+      const inStrict = isWithinStrictHours(
+        ctx.nowBangkok,
+        ctx.strictHours.start,
+        ctx.strictHours.end,
+      );
+      lines.push(
+        inStrict
+          ? `ขณะนี้เวลา ${ctx.nowBangkok} น. อยู่ในช่วงเฝ้าระวังเข้มข้น (${ctx.strictHours.start}–${ctx.strictHours.end}) — กิจกรรมของคนในช่วงนี้ให้ถือว่าน่าสงสัยกว่าปกติและยกระดับ severity ขึ้น`
+          : `ขณะนี้เวลา ${ctx.nowBangkok} น. เป็นช่วงเวลาปกติ`,
+      );
+    } else {
+      lines.push(`ขณะนี้เวลา ${ctx.nowBangkok} น.`);
+    }
+  }
+
+  const instructions = [ctx.siteInstructions, ctx.cameraInstructions]
+    .map((s) => s?.trim())
+    .filter((s): s is string => !!s);
+  if (instructions.length > 0) {
+    lines.push(
+      `คำสั่งเพิ่มเติมจากผู้ดูแล (ให้ความสำคัญสูง หากภาพเข้าเงื่อนไขเหล่านี้ต้องระบุในคำบรรยายเสมอ): ${instructions.join(" / ")}`,
+    );
+  }
+
+  lines.push(
     "วิเคราะห์ภาพแล้วตอบเป็น JSON เท่านั้น ตาม schema นี้:",
     '{"verified": boolean, "severity": "info"|"warning"|"critical", "description_th": string, "label": string|null}',
-    "- verified: true ถ้าเห็นเหตุการณ์ที่ควรสนใจจริง (คน/รถ/การบุกรุก), false ถ้าเป็นการแจ้งเตือนหลอก (เงา แสง ฝน สัตว์เล็ก ต้นไม้ไหว)",
-    "- severity: critical = คนปีนรั้ว/งัดแงะ/พฤติกรรมน่าสงสัยชัดเจน, warning = คน/รถแปลกปลอมที่ควรตรวจสอบ, info = กิจกรรมปกติ",
+    "- verified: true ถ้าเห็นเหตุการณ์ที่ควรสนใจจริง (คน/รถ/การบุกรุก/สิ่งที่คำสั่งผู้ดูแลระบุ), false ถ้าเป็นการแจ้งเตือนหลอก (เงา แสง ฝน สัตว์เล็ก ต้นไม้ไหว)",
+    "- severity: critical = อันตราย/บุกรุกชัดเจนหรือเหตุในรายการเฝ้าระวังเสมอ, warning = ควรให้เจ้าหน้าที่ตรวจสอบ, info = กิจกรรมปกติ",
     "- description_th: บรรยายสั้น 1 ประโยคภาษาไทย เจาะจงสิ่งที่เห็น เช่น จำนวนคน การแต่งกาย ทิศทางการเคลื่อนไหว",
     '- label: สิ่งหลักที่ตรวจพบเป็นอังกฤษ เช่น "person", "car", "motorcycle", "dog" หรือ null ถ้าไม่มี',
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function parseAnalysis(text: string, model: string): VlmAnalysis {

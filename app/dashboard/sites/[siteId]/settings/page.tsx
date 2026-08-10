@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionClient } from "@/lib/supabase-auth";
-import { saveSiteRules } from "./actions";
+import { saveCameraConfig, saveSiteRules } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +34,23 @@ export default async function SiteSettingsPage({
   const supabase = await getSessionClient();
   const { data: site } = await supabase
     .from("sites")
-    .select("id, name, rules")
+    .select("id, name, rules, custom_instructions_th")
     .eq("id", siteId)
     .maybeSingle();
   if (!site) notFound();
+
+  const { data: cameraRows } = await supabase
+    .from("cameras")
+    .select("id, name, enabled, profile_id, custom_instructions_th")
+    .eq("site_id", siteId)
+    .order("name");
+  const cameras = cameraRows ?? [];
+
+  const { data: profileRows } = await supabase
+    .from("camera_profiles")
+    .select("id, name_th, description_th")
+    .order("name_th");
+  const cameraProfiles = profileRows ?? [];
 
   const rules = (site.rules ?? {}) as Rules;
   const alertOn = (key: string) => rules.alerts?.[key] ?? true;
@@ -119,6 +132,21 @@ export default async function SiteSettingsPage({
           </select>
         </section>
 
+        <section style={box}>
+          <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>💬 คำสั่งพิเศษของโครงการนี้</h2>
+          <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+            พิมพ์เป็นภาษาไทยธรรมดา ระบบจะนำไปใช้กับทุกกล้องของโครงการทันที เช่น
+            "ช่วงปิดปรับปรุงสระ ถ้ามีคนเข้าเขตสระให้แจ้งทันที"
+          </p>
+          <textarea
+            name="site_instructions"
+            defaultValue={site.custom_instructions_th ?? ""}
+            rows={3}
+            placeholder="ยังไม่มีคำสั่งพิเศษ"
+            style={{ width: "100%", padding: "0.6rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.95rem", fontFamily: "inherit", boxSizing: "border-box" }}
+          />
+        </section>
+
         <button
           type="submit"
           style={{ width: "100%", padding: "0.85rem", fontSize: "1.05rem", fontWeight: 700, color: "#003D1C", background: "#00DE68", border: "none", borderRadius: 999, cursor: "pointer" }}
@@ -126,6 +154,57 @@ export default async function SiteSettingsPage({
           💾 บันทึกการตั้งค่า
         </button>
       </form>
+
+      <h2 style={{ margin: "1.6rem 0 0.35rem", fontSize: "1.15rem" }}>📷 กล้องแต่ละตัว</h2>
+      <p style={{ margin: "0 0 0.9rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+        เลือกหน้าที่ให้กล้อง เปิด-ปิดการวิเคราะห์ และสั่งงานเพิ่มเป็นภาษาไทยได้ทีละตัว
+      </p>
+      {cameras.map((cam) => (
+        <form key={cam.id} action={saveCameraConfig}>
+          <section style={box}>
+            <input type="hidden" name="cameraId" value={cam.id} />
+            <input type="hidden" name="siteId" value={siteId} />
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: "1rem" }}>{cam.name}</strong>
+              <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.9rem" }}>
+                <input type="checkbox" name="enabled" defaultChecked={cam.enabled !== false} style={{ width: 18, height: 18 }} />
+                เปิดใช้ Tassana AI
+              </label>
+            </div>
+            <label style={{ display: "block", marginTop: "0.7rem", fontSize: "0.85rem", color: "#9E9E9E" }}>
+              หน้าที่ของกล้องนี้
+              <select
+                name="profileId"
+                defaultValue={cam.profile_id ?? ""}
+                style={{ display: "block", width: "100%", marginTop: 4, padding: "0.5rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.95rem" }}
+              >
+                <option value="">— ยังไม่กำหนด (ใช้เฉพาะกฎพื้นฐาน) —</option>
+                {cameraProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name_th} — {p.description_th}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "block", marginTop: "0.7rem", fontSize: "0.85rem", color: "#9E9E9E" }}>
+              คำสั่งเพิ่มเติมเฉพาะกล้องนี้ (ภาษาไทยธรรมดา)
+              <textarea
+                name="instructions"
+                defaultValue={cam.custom_instructions_th ?? ""}
+                rows={2}
+                placeholder={'เช่น "ช่วยดูด้วยว่ามีรถมาจอดขวางประตูหนีไฟไหม"'}
+                style={{ display: "block", width: "100%", marginTop: 4, padding: "0.6rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.95rem", fontFamily: "inherit", boxSizing: "border-box" }}
+              />
+            </label>
+            <button
+              type="submit"
+              style={{ marginTop: "0.7rem", padding: "0.5rem 1.3rem", fontSize: "0.95rem", fontWeight: 600, color: "#fff", background: "#1D1D1F", border: "none", borderRadius: 999, cursor: "pointer" }}
+            >
+              บันทึกกล้องนี้
+            </button>
+          </section>
+        </form>
+      ))}
     </main>
   );
 }

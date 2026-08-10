@@ -51,17 +51,19 @@ export async function POST(
 
   // Resolve camera by the device-side channel reference, if we know it.
   let cameraId: string | null = null;
+  let cameraEnabled = true;
   const sourceType = detectSourceType(payload);
   const cameraRef = sourceType ? extractCameraRef(sourceType, payload) : null;
   if (sourceType && cameraRef) {
     const { data: camera } = await supabase
       .from("cameras")
-      .select("id")
+      .select("id, enabled")
       .eq("site_id", site.id)
       .eq("source_type", sourceType)
       .eq("source_camera_ref", cameraRef)
       .maybeSingle();
     cameraId = camera?.id ?? null;
+    cameraEnabled = camera?.enabled !== false;
   }
 
   const event = normalizeEvent(payload, {
@@ -86,13 +88,17 @@ export async function POST(
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 
-  const { error: enqueueError } = await supabase.rpc("enqueue_event", {
-    p_event_id: event.event_id,
-  });
-  if (enqueueError) {
-    // Event row exists; worker reconciliation will pick it up. Do not fail the
-    // device's callback — most NVRs treat non-2xx as "retry forever".
-    console.error("webhook: enqueue failed", enqueueError);
+  // Disabled camera (ADR-011): event recorded for history, but no analysis
+  // and no alert — the switch is the billing boundary.
+  if (cameraEnabled) {
+    const { error: enqueueError } = await supabase.rpc("enqueue_event", {
+      p_event_id: event.event_id,
+    });
+    if (enqueueError) {
+      // Event row exists; worker reconciliation will pick it up. Do not fail the
+      // device's callback — most NVRs treat non-2xx as "retry forever".
+      console.error("webhook: enqueue failed", enqueueError);
+    }
   }
 
   return NextResponse.json(

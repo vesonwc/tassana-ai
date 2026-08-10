@@ -50,8 +50,25 @@ interface EventRow {
   event_type: string;
   media: { snapshot_path: string | null };
   ai: AiResult;
-  cameras: { name: string } | null;
-  sites: { name: string } | null;
+  cameras: {
+    name: string;
+    enabled: boolean;
+    custom_instructions_th: string | null;
+    camera_profiles: { name_th: string; vlm_prompt_th: string } | null;
+  } | null;
+  sites: {
+    name: string;
+    custom_instructions_th: string | null;
+    rules: { strict_hours?: { start: string; end: string } } | null;
+  } | null;
+}
+
+function bangkokNowHHmm(): string {
+  return new Date().toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -108,10 +125,17 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
   }
   const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
   const mime = blob.type || "image/jpeg";
+  // Assemble the three config layers (ADR-011) from data, not code.
   return analyzeWithFallback(base64, mime, {
     eventType: row.event_type,
     cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
     siteName: row.sites?.name ?? "ไม่ระบุไซต์",
+    profileName: row.cameras?.camera_profiles?.name_th ?? null,
+    profilePrompt: row.cameras?.camera_profiles?.vlm_prompt_th ?? null,
+    siteInstructions: row.sites?.custom_instructions_th ?? null,
+    cameraInstructions: row.cameras?.custom_instructions_th ?? null,
+    strictHours: row.sites?.rules?.strict_hours ?? null,
+    nowBangkok: bangkokNowHHmm(),
   });
 }
 
@@ -125,7 +149,9 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
 
   const { data, error } = await supabase
     .from("events")
-    .select("event_id, event_type, media, ai, cameras(name), sites(name)")
+    .select(
+      "event_id, event_type, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, custom_instructions_th, rules)",
+    )
     .eq("event_id", eventId)
     .maybeSingle();
   if (error) throw new Error(`event fetch failed: ${error.message}`);
@@ -137,6 +163,19 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   const row = data as unknown as EventRow;
 
   if (row.ai?.processed_at) {
+    await ack(msg.msg_id);
+    return;
+  }
+
+  // Camera switched off (ADR-011): keep the event, skip paid analysis.
+  if (row.cameras?.enabled === false) {
+    await updateAi(eventId, {
+      verified: null,
+      severity: null,
+      description_th: null,
+      model: null,
+      processed_at: new Date().toISOString(),
+    });
     await ack(msg.msg_id);
     return;
   }

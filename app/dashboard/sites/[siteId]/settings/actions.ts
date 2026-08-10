@@ -45,8 +45,46 @@ export async function saveSiteRules(formData: FormData): Promise<void> {
       : "medium",
   };
 
+  // Layer-3 instruction (ADR-011): plain Thai, straight into the VLM prompt.
+  const siteInstructions = String(formData.get("site_instructions") ?? "").trim();
+
   const service = getServiceClient();
-  await service.from("sites").update({ rules }).eq("id", siteId);
+  await service
+    .from("sites")
+    .update({ rules, custom_instructions_th: siteInstructions || null })
+    .eq("id", siteId);
+
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
+  redirect(`/dashboard/sites/${siteId}/settings?saved=1`);
+}
+
+// Per-camera config (ADR-011): role profile, enable switch, and plain-Thai
+// instructions — all data, no deploy.
+export async function saveCameraConfig(formData: FormData): Promise<void> {
+  const cameraId = String(formData.get("cameraId") ?? "");
+  const siteId = String(formData.get("siteId") ?? "");
+  if (!cameraId) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("cameras")
+    .select("id")
+    .eq("id", cameraId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const profileId = String(formData.get("profileId") ?? "");
+  const instructions = String(formData.get("instructions") ?? "").trim();
+
+  const service = getServiceClient();
+  await service
+    .from("cameras")
+    .update({
+      enabled: formData.get("enabled") === "on",
+      profile_id: profileId || null,
+      custom_instructions_th: instructions || null,
+    })
+    .eq("id", cameraId);
 
   revalidatePath(`/dashboard/sites/${siteId}/settings`);
   redirect(`/dashboard/sites/${siteId}/settings?saved=1`);
