@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionClient } from "@/lib/supabase-auth";
-import { getServiceClient } from "@/lib/supabase";
 import { ALARM_TYPES, formatThaiTime, TYPE_TH } from "@/lib/labels";
 import type { EventType } from "@/lib/types";
 import { reanalyzeEvent, submitEventFeedback } from "./actions";
@@ -35,10 +34,10 @@ export default async function SiteEventsPage({
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{ days?: string; camera?: string; type?: string }>;
+  searchParams: Promise<{ days?: string; camera?: string; type?: string; view?: string }>;
 }) {
   const { siteId } = await params;
-  const { days = "1", camera = "", type = "" } = await searchParams;
+  const { days = "1", camera = "", type = "", view = "" } = await searchParams;
 
   const supabase = await getSessionClient();
 
@@ -71,23 +70,15 @@ export default async function SiteEventsPage({
     .limit(60);
   if (camera) query = query.eq("camera_id", camera);
   if (type) query = query.eq("event_type", type);
+  // "เฉพาะผิดปกติ": AI-verified events at warning/critical only.
+  if (view === "abnormal") {
+    query = query.filter("ai->>severity", "in", '("warning","critical")');
+  }
 
   const { data } = await query;
   const events = (data ?? []) as unknown as EventRow[];
-
-  // Snapshot URLs: bucket is private; sign for one hour via the service client.
-  const service = getServiceClient();
-  const imageUrls = new Map<string, string>();
-  await Promise.all(
-    events
-      .filter((ev) => ev.media?.snapshot_path)
-      .map(async (ev) => {
-        const { data: signed } = await service.storage
-          .from("snapshots")
-          .createSignedUrl(ev.media!.snapshot_path!, 3600);
-        if (signed?.signedUrl) imageUrls.set(ev.event_id, signed.signedUrl);
-      }),
-  );
+  // No inline images by design — the list stays a few KB and renders instantly;
+  // each photo is fetched on demand via the snapshot route.
 
   return (
     <main>
@@ -137,6 +128,10 @@ export default async function SiteEventsPage({
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
+        <select name="view" defaultValue={view} style={{ padding: "0.45rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.95rem" }}>
+          <option value="">แสดงทั้งหมด</option>
+          <option value="abnormal">🔴 เฉพาะผิดปกติ</option>
+        </select>
         <button
           type="submit"
           style={{ padding: "0.45rem 1.1rem", borderRadius: 999, border: "none", background: "#1D1D1F", color: "#fff", fontSize: "0.95rem", fontWeight: 500, cursor: "pointer" }}
@@ -153,7 +148,6 @@ export default async function SiteEventsPage({
         {events.map((ev) => {
           const isAlarm = ALARM_TYPES.includes(ev.event_type);
           const feedback = ev.alerts?.[0]?.feedback ?? null;
-          const img = imageUrls.get(ev.event_id);
           return (
             <div
               key={ev.event_id}
@@ -169,22 +163,37 @@ export default async function SiteEventsPage({
                 flexWrap: "wrap",
               }}
             >
-              {img && (
-                <a href={img} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img}
-                    alt="ภาพเหตุการณ์"
-                    style={{ width: 140, borderRadius: 8, display: "block" }}
-                  />
-                </a>
-              )}
               <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 700 }}>
+                <div style={{ fontWeight: 700, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   {TYPE_TH[ev.event_type] ?? ev.event_type}
-                  <span style={{ fontWeight: 400, color: "#9E9E9E", marginLeft: 8, fontSize: "0.85rem" }}>
+                  {ev.ai?.verified === true && (ev.ai.severity === "warning" || ev.ai.severity === "critical") && (
+                    <span style={{ fontWeight: 600, fontSize: "0.75rem", color: "#C0392B", background: "#FDECEC", borderRadius: 999, padding: "0.1rem 0.6rem" }}>
+                      ผิดปกติ
+                    </span>
+                  )}
+                  {ev.ai?.verified === true && ev.ai.severity === "info" && (
+                    <span style={{ fontWeight: 600, fontSize: "0.75rem", color: "#009E4A", background: "rgba(0,222,104,0.12)", borderRadius: 999, padding: "0.1rem 0.6rem" }}>
+                      ปกติ
+                    </span>
+                  )}
+                  {ev.ai?.verified === false && (
+                    <span style={{ fontWeight: 600, fontSize: "0.75rem", color: "#9E9E9E", background: "#eef0f2", borderRadius: 999, padding: "0.1rem 0.6rem" }}>
+                      กรองแล้ว: แจ้งเตือนหลอก
+                    </span>
+                  )}
+                  <span style={{ fontWeight: 400, color: "#9E9E9E", fontSize: "0.85rem" }}>
                     {ev.cameras?.name ?? "ไม่ระบุกล้อง"} · {formatThaiTime(ev.occurred_at)}
                   </span>
+                  {ev.media?.snapshot_path && (
+                    <a
+                      href={`/dashboard/sites/${siteId}/snapshot/${ev.event_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontWeight: 500, fontSize: "0.85rem", color: "#009E4A", marginLeft: "auto" }}
+                    >
+                      📷 ดูภาพ
+                    </a>
+                  )}
                 </div>
                 {ev.ai?.description_th && (
                   <div style={{ marginTop: 4, color: "#1D1D1F" }}>🤖 {ev.ai.description_th}</div>
