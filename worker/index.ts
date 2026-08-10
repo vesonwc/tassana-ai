@@ -275,6 +275,115 @@ async function checkHeartbeats(): Promise<void> {
       );
     }
   }
+
+  // Per-camera pulse: one dead channel among many active ones must still alert.
+  const { data: cams, error: camError } = await supabase
+    .from("cameras")
+    .select("id, name, site_id, last_event_at")
+    .eq("enabled", true)
+    .not("last_event_at", "is", null)
+    .lt("last_event_at", cutoff);
+  if (camError) {
+    console.error("worker: camera heartbeat query failed", camError.message);
+    return;
+  }
+  for (const cam of cams ?? []) {
+    const { error: insertError } = await supabase.from("events").insert({
+      event_id: uuidv7(),
+      site_id: cam.site_id,
+      camera_id: cam.id,
+      source_type: "manual",
+      source_raw_id: `cam-heartbeat:${cam.id}:${cam.last_event_at}`,
+      event_type: "camera_offline",
+      occurred_at: now,
+      received_at: now,
+      detection: { label: null, confidence: null, zone: null, plate: null, bbox: null },
+      media: { snapshot_path: null, clip_path: null, clip_status: "none" },
+      ai: { verified: null, severity: null, description_th: null, model: null, processed_at: null },
+      raw: {
+        reason: "camera_heartbeat_timeout",
+        threshold_min: HEARTBEAT_TIMEOUT_MIN,
+        last_event_at: cam.last_event_at,
+      },
+    });
+    if (insertError) {
+      if (insertError.code !== "23505") {
+        console.error("worker: camera offline insert failed", insertError.message);
+      }
+    } else {
+      console.log(`worker: กล้อง "${cam.name}" เงียบเกิน ${HEARTBEAT_TIMEOUT_MIN} นาที → camera_offline`);
+    }
+  }
+}
+
+// ADR-012: retention — delete old events + snapshots; keep feedback-labelled
+// events (training data, ADR-008) but drop their images.
+const RETENTION_SWEEP_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_RETENTION_DAYS = 60;
+
+async function sweepRetention(): Promise<void> {
+  const { data: sites, error } = await supabase
+    .from("sites")
+    .select("id, name, rules");
+  if (error) {
+    console.error("worker: retention site query failed", error.message);
+    return;
+  }
+  for (const site of sites ?? []) {
+    const days =
+      (site.rules as { retention_days?: number } | null)?.retention_days ??
+      DEFAULT_RETENTION_DAYS;
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    const { data: rows, error: evError } = await supabase
+      .from("events")
+      .select("event_id, media, alerts(feedback)")
+      .eq("site_id", site.id)
+      .lt("occurred_at", cutoff)
+      .limit(500);
+    if (evError || !rows || rows.length === 0) continue;
+
+    const paths = rows
+      .map((r) => (r.media as { snapshot_path?: string } | null)?.snapshot_path)
+      .filter((p): p is string => !!p);
+    for (let i = 0; i < paths.length; i += 100) {
+      const { error: rmError } = await supabase.storage
+        .from("snapshots")
+        .remove(paths.slice(i, i + 100));
+      if (rmError) console.error("worker: snapshot delete failed", rmError.message);
+    }
+
+    const withFeedback = rows.filter((r) =>
+      (r.alerts as { feedback: string | null }[] | null)?.some((a) => a.feedback),
+    );
+    const deletable = rows.filter((r) => !withFeedback.includes(r));
+
+    if (deletable.length > 0) {
+      const { error: delError } = await supabase
+        .from("events")
+        .delete()
+        .in("event_id", deletable.map((r) => r.event_id));
+      if (delError) console.error("worker: event delete failed", delError.message);
+    }
+    for (const r of withFeedback) {
+      await supabase
+        .from("events")
+        .update({ media: { snapshot_path: null, clip_path: null, clip_status: "none" } })
+        .eq("event_id", r.event_id);
+    }
+    console.log(
+      `worker: retention "${site.name}" — ลบ ${deletable.length} events, เก็บ ${withFeedback.length} ที่มี feedback (ลบเฉพาะรูป), เกิน ${days} วัน`,
+    );
+  }
+}
+
+// ADR-012: dead-man switch — the dashboard warns admins if this pulse stops.
+async function pulseSystemStatus(): Promise<void> {
+  const { error } = await supabase.from("system_status").upsert({
+    key: "worker_heartbeat",
+    value: { pid: process.pid },
+    updated_at: new Date().toISOString(),
+  });
+  if (error) console.error("worker: status pulse failed", error.message);
 }
 
 // Reconciliation (architecture doc §ความทนทาน): events whose enqueue was lost
@@ -314,6 +423,10 @@ async function main(): Promise<void> {
   setInterval(() => void checkHeartbeats(), HEARTBEAT_CHECK_MS);
   void reconcileStuckEvents();
   setInterval(() => void reconcileStuckEvents(), RECONCILE_MS);
+  void sweepRetention();
+  setInterval(() => void sweepRetention(), RETENTION_SWEEP_MS);
+  void pulseSystemStatus();
+  setInterval(() => void pulseSystemStatus(), 60_000);
   for (;;) {
     try {
       const { data, error } = await supabase.rpc("dequeue_events", {

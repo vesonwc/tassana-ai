@@ -6,6 +6,7 @@ const state = {
   camera: { id: "cam-uuid-1" } as { id: string } | null,
   insertDuplicate: false,
   insertCalls: [] as unknown[],
+  cameraInserts: [] as unknown[],
   rpcCalls: [] as { fn: string; args: unknown }[],
   heartbeatCalls: 0,
 };
@@ -39,6 +40,21 @@ function fakeClient() {
                   maybeSingle: async () => ({ data: state.camera, error: null }),
                 }),
               }),
+            }),
+          }),
+          insert: (row: unknown) => {
+            state.cameraInserts.push(row);
+            return {
+              select: () => ({
+                maybeSingle: async () => ({ data: { id: "cam-new" }, error: null }),
+              }),
+            };
+          },
+          update: () => ({
+            eq: () => ({
+              then: (resolve: (r: { error: null }) => void) => {
+                resolve({ error: null });
+              },
             }),
           }),
         };
@@ -98,6 +114,7 @@ beforeEach(() => {
   state.camera = { id: "cam-uuid-1" };
   state.insertDuplicate = false;
   state.insertCalls = [];
+  state.cameraInserts = [];
   state.rpcCalls = [];
   state.heartbeatCalls = 0;
 });
@@ -158,12 +175,19 @@ describe("POST /api/webhook/[siteKey]", () => {
     expect(state.rpcCalls).toHaveLength(0);
   });
 
-  it("still accepts the event when the camera cannot be resolved", async () => {
+  it("auto-registers an unknown camera as disabled and skips analysis (ADR-011)", async () => {
     state.camera = null;
     const res = await callRoute("good-key", JSON.stringify(GOOD_PAYLOAD));
     expect(res.status).toBe(201);
     const row = state.insertCalls[0] as NormalizedEvent;
-    expect(row.camera_id).toBeNull();
+    expect(row.camera_id).toBe("cam-new");
+    expect(state.cameraInserts).toHaveLength(1);
+    expect(state.cameraInserts[0]).toMatchObject({
+      source_camera_ref: "1",
+      enabled: false,
+    });
+    // Disabled camera → event stored but never enqueued for paid analysis.
+    expect(state.rpcCalls).toHaveLength(0);
   });
 
   it("stores an unrecognizable payload as manual/unknown instead of dropping it", async () => {

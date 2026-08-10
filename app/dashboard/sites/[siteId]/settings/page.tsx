@@ -67,7 +67,10 @@ export default async function SiteSettingsPage({
     <main style={{ maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: "0.75rem" }}>
         <h1 style={{ margin: 0, fontSize: "1.3rem" }}>ตั้งค่า — {site.name}</h1>
-        <Link href={`/dashboard/sites/${siteId}`} style={{ fontSize: "0.9rem", color: "#9E9E9E", marginLeft: "auto" }}>
+        <Link href={`/dashboard/sites/${siteId}/connect`} style={{ fontSize: "0.9rem", color: "#009E4A", marginLeft: "auto" }}>
+          🔌 การเชื่อมต่อ
+        </Link>
+        <Link href={`/dashboard/sites/${siteId}`} style={{ fontSize: "0.9rem", color: "#9E9E9E" }}>
           ← กลับ
         </Link>
       </div>

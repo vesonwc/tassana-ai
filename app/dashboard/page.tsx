@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSessionClient } from "@/lib/supabase-auth";
+import { getSessionClient, getUserAndProfile } from "@/lib/supabase-auth";
 
 // Home = one card per site. Green/red status a guard can read at a glance.
 const OFFLINE_AFTER_MIN = 10;
@@ -27,12 +27,28 @@ function siteHealth(site: SiteRow): {
 }
 
 export default async function DashboardHome() {
+  const session = await getUserAndProfile();
+  const isAdmin = session?.profile.role === "admin";
+
   const supabase = await getSessionClient();
   const { data } = await supabase
     .from("sites")
     .select("id, name, heartbeat_at, status")
     .order("name");
   const sites = (data ?? []) as SiteRow[];
+
+  // Dead-man switch (ADR-012): warn admins when the analysis worker's pulse stops.
+  let workerDown = false;
+  if (isAdmin) {
+    const { data: status } = await supabase
+      .from("system_status")
+      .select("updated_at")
+      .eq("key", "worker_heartbeat")
+      .maybeSingle();
+    if (status?.updated_at) {
+      workerDown = Date.now() - new Date(status.updated_at).getTime() > 5 * 60_000;
+    }
+  }
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -50,7 +66,24 @@ export default async function DashboardHome() {
 
   return (
     <main>
-      <h1 style={{ margin: "0 0 0.25rem", fontSize: "1.4rem" }}>โครงการของคุณ</h1>
+      {workerDown && (
+        <p style={{ background: "#FDECEC", color: "#C0392B", fontWeight: 600, padding: "0.7rem 1rem", borderRadius: 12, marginTop: 0 }}>
+          🚨 ระบบวิเคราะห์ AI หยุดทำงานเกิน 5 นาที — ตรวจสอบ Railway ด่วน (event ยังถูกบันทึกอยู่ ไม่หาย)
+        </p>
+      )}
+      <div style={{ display: "flex", alignItems: "baseline", gap: "0.75rem", flexWrap: "wrap" }}>
+        <h1 style={{ margin: "0 0 0.25rem", fontSize: "1.4rem" }}>โครงการของคุณ</h1>
+        {isAdmin && (
+          <span style={{ marginLeft: "auto", display: "flex", gap: "0.75rem" }}>
+            <Link href="/dashboard/admin/new-site" style={{ fontSize: "0.9rem", color: "#009E4A", fontWeight: 500 }}>
+              ➕ เปิดโครงการใหม่
+            </Link>
+            <Link href="/dashboard/admin/new-user" style={{ fontSize: "0.9rem", color: "#009E4A", fontWeight: 500 }}>
+              👤 เพิ่มผู้ใช้
+            </Link>
+          </span>
+        )}
+      </div>
       <p style={{ margin: "0 0 1rem", color: "#9E9E9E", fontSize: "0.9rem" }}>
         แตะที่โครงการเพื่อดูเหตุการณ์
       </p>

@@ -70,6 +70,15 @@
 - [x] test prompt 3 ชั้น (28 ข้อรวมผ่าน)
 - [ ] รัน `supabase/migrations/20260809000004_config_as_data.sql` ใน SQL Editor
 
+## ปิดลูปแพลตฟอร์ม (แทรก 2026-08-09 ดึก ตามการวิเคราะห์ "คิดให้ครบลูป") [สถานะ: โค้ดเสร็จ — รอรัน migration 0004+0005]
+- [x] Onboarding admin: หน้าเปิดโครงการใหม่ (เลือกแม่แบบ+สร้าง siteKey), หน้าเชื่อมกล้อง (webhook URL + คู่มือ Hikvision + rotate key), หน้าเพิ่มผู้ใช้ (สุ่มรหัสผ่านให้)
+- [x] กล้อง auto-register: event แรกจากช่องที่ไม่รู้จัก → สร้างรายการกล้องเอง สถานะปิด รอเปิดสวิตช์ (ADR-011)
+- [x] Heartbeat รายกล้อง (last_event_at) — กล้องเดียวดับท่ามกลางกล้องอื่นที่ยังทำงาน ระบบเห็น
+- [x] Retention 60 วัน + เก็บ event ที่มี feedback ถาวรแบบไม่มีรูป (ADR-012), dead-man switch ของ worker + แถบเตือนบน dashboard
+- [x] คุณภาพรายกล้อง 7 วันในหน้ารายงาน (% แจ้งหลอก → รู้ว่ากล้องไหนควรจูน) + docs/costs.md ต้นทุนต่อหน่วย
+- [ ] สิ่งที่ user ต้องทำ: รัน migration 0004 + 0005 ใน SQL Editor / อัป Railway เป็น Hobby ก่อน trial หมด (~ต้นก.ย.) / เปิด billing Gemini ก่อนไซต์นำร่อง
+- ช่องว่างใหญ่ที่เหลือ: **M2 LINE** (ลูป event→คน ยังต้องเปิดเว็บเอง), Hikvision XML จริง (M6)
+
 ## หลัง MVP (ยังไม่ทำ — จดไว้กันลืม)
 - Frigate adapter (โหมดกล่อง Edge) / LPR + ฐานทะเบียนรถ / รายงานรายเดือน
 - ระบบ billing / หน้า onboarding ไซต์ใหม่แบบ self-serve

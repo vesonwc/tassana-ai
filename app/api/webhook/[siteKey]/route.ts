@@ -62,8 +62,38 @@ export async function POST(
       .eq("source_type", sourceType)
       .eq("source_camera_ref", cameraRef)
       .maybeSingle();
-    cameraId = camera?.id ?? null;
-    cameraEnabled = camera?.enabled !== false;
+    if (camera) {
+      cameraId = camera.id;
+      cameraEnabled = camera.enabled !== false;
+    } else {
+      // Auto-register (ADR-011): first event from an unknown channel creates
+      // the camera row, switched OFF — it shows up in settings as "ตรวจพบใหม่"
+      // waiting for someone to flip the paid switch.
+      const { data: created } = await supabase
+        .from("cameras")
+        .insert({
+          site_id: site.id,
+          name: `กล้องช่อง ${cameraRef} (ตรวจพบใหม่)`,
+          source_type: sourceType,
+          source_camera_ref: cameraRef,
+          enabled: false,
+        })
+        .select("id")
+        .maybeSingle();
+      cameraId = created?.id ?? null;
+      cameraEnabled = false;
+    }
+    if (cameraId) {
+      // Per-camera heartbeat: a single dead channel among 32 must not hide
+      // behind the site-level pulse.
+      void supabase
+        .from("cameras")
+        .update({ last_event_at: receivedAt })
+        .eq("id", cameraId)
+        .then(({ error }) => {
+          if (error) console.error("webhook: camera heartbeat failed", error);
+        });
+    }
   }
 
   const event = normalizeEvent(payload, {
