@@ -28,7 +28,7 @@ export async function createSite(formData: FormData): Promise<void> {
     .maybeSingle();
   if (error || !site) throw new Error(`create site failed: ${error?.message}`);
 
-  redirect(`/dashboard/sites/${site.id}/connect`);
+  redirect(`/dashboard/sites/${site.id}/settings?tab=connect`);
 }
 
 export async function rotateSiteKey(formData: FormData): Promise<void> {
@@ -40,7 +40,7 @@ export async function rotateSiteKey(formData: FormData): Promise<void> {
     .from("sites")
     .update({ site_key: `sk_${randomUUID().replace(/-/g, "")}` })
     .eq("id", siteId);
-  revalidatePath(`/dashboard/sites/${siteId}/connect`);
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
 }
 
 export interface CreateUserState {

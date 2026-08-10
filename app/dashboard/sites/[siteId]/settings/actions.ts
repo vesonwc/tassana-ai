@@ -55,7 +55,7 @@ export async function saveSiteRules(formData: FormData): Promise<void> {
     .eq("id", siteId);
 
   revalidatePath(`/dashboard/sites/${siteId}/settings`);
-  redirect(`/dashboard/sites/${siteId}/settings?saved=1`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=alerts&saved=1`);
 }
 
 // Per-camera config (ADR-011): role profile, enable switch, and plain-Thai
@@ -87,5 +87,5 @@ export async function saveCameraConfig(formData: FormData): Promise<void> {
     .eq("id", cameraId);
 
   revalidatePath(`/dashboard/sites/${siteId}/settings`);
-  redirect(`/dashboard/sites/${siteId}/settings?saved=1`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=cameras&saved=1`);
 }
