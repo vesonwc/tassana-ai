@@ -33,21 +33,32 @@ const supabase = createClient(url, key, { auth: { persistSession: false } });
 
 function run(
   args: string[],
+  timeoutMs = 15_000,
 ): Promise<{ stdout: Buffer; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
     const proc = spawn(FFMPEG, args, { windowsHide: true });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
+    // A busy/locked camera can make ffmpeg hang forever on device open —
+    // without this kill switch the whole agent freezes silently.
+    const timer = setTimeout(() => {
+      proc.kill();
+      reject(new Error(`ffmpeg timed out after ${timeoutMs}ms (camera busy?)`));
+    }, timeoutMs);
     proc.stdout.on("data", (d: Buffer) => out.push(d));
     proc.stderr.on("data", (d: Buffer) => err.push(d));
-    proc.on("error", reject);
-    proc.on("close", (code) =>
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
       resolve({
         stdout: Buffer.concat(out),
         stderr: Buffer.concat(err).toString("utf8"),
         code: code ?? -1,
-      }),
-    );
+      });
+    });
   });
 }
 
@@ -159,9 +170,14 @@ async function main(): Promise<void> {
 
   let previous: Buffer | null = null;
   let lastReportAt = 0;
+  let frames = 0;
   for (;;) {
     try {
       const frame = await grabFrame(device);
+      frames += 1;
+      if (frames % 200 === 0) {
+        console.log(`agent: alive — compared ${frames} frames so far`);
+      }
       if (previous) {
         const pct = await motionPercent(previous, frame);
         const cooledDown = Date.now() - lastReportAt > COOLDOWN_MS;
