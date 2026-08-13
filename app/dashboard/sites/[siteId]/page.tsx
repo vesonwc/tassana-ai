@@ -198,12 +198,12 @@ export default async function SiteEventsPage({
                 {ev.ai?.description_th && (
                   <div style={{ marginTop: 4, color: "#1D1D1F" }}>🤖 {ev.ai.description_th}</div>
                 )}
-                {!ev.ai?.description_th && !ev.ai?.processed_at && (
+                {!ev.ai?.description_th && !ev.ai?.processed_at && ev.media?.snapshot_path && (
                   <div style={{ marginTop: 4, color: "#9E9E9E", fontSize: "0.85rem" }}>
                     ⏳ กำลังวิเคราะห์ภาพ... (รีเฟรชหน้าเพื่อดูผล)
                   </div>
                 )}
-                {!ev.ai?.description_th && ev.ai?.processed_at && (
+                {!ev.ai?.description_th && ev.ai?.processed_at && ev.media?.snapshot_path && (
                   <form action={reanalyzeEvent} style={{ marginTop: 4 }}>
                     <input type="hidden" name="eventId" value={ev.event_id} />
                     <input type="hidden" name="siteId" value={siteId} />
