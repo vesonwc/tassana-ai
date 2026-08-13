@@ -12,6 +12,9 @@ export interface VlmAnalysis {
   description_th: string;
   label: string | null;
   model: string;
+  // ADR-013: the model may admit uncertainty and ask the humans instead.
+  uncertain: boolean;
+  question_th: string | null;
 }
 
 export class VlmError extends Error {}
@@ -31,6 +34,8 @@ export interface SnapshotContext {
   // Schedule context: the same rule at 2 AM and 2 PM should not sound the same.
   strictHours?: { start: string; end: string } | null;
   nowBangkok?: string; // "HH:mm", injectable for tests
+  // Layer 4 (ADR-013): facts humans have taught this site.
+  knowledge?: string[];
 }
 
 // Layer 1 (ADR-011): universal watch list. Every camera, cannot be disabled.
@@ -82,6 +87,12 @@ export function buildPrompt(ctx: SnapshotContext): string {
     }
   }
 
+  if (ctx.knowledge && ctx.knowledge.length > 0) {
+    lines.push(
+      `ความรู้เฉพาะไซต์นี้ที่ผู้ดูแลเคยสอนไว้ (เชื่อถือได้ ใช้ประกอบการตัดสินเสมอ): ${ctx.knowledge.map((k) => `"${k}"`).join(" / ")}`,
+    );
+  }
+
   const instructions = [ctx.siteInstructions, ctx.cameraInstructions]
     .map((s) => s?.trim())
     .filter((s): s is string => !!s);
@@ -93,7 +104,8 @@ export function buildPrompt(ctx: SnapshotContext): string {
 
   lines.push(
     "วิเคราะห์ภาพแล้วตอบเป็น JSON เท่านั้น ตาม schema นี้:",
-    '{"verified": boolean, "severity": "info"|"warning"|"critical", "description_th": string, "label": string|null}',
+    '{"verified": boolean, "severity": "info"|"warning"|"critical", "description_th": string, "label": string|null, "uncertain": boolean, "question_th": string|null}',
+    "- uncertain: true เฉพาะเมื่อคุณเห็นสิ่งที่ระบุไม่ได้หรือไม่แน่ใจว่าควรแจ้งเตือนไหม และความรู้ที่มีอยู่ตอบไม่ได้ — พร้อมตั้ง question_th เป็นคำถามสั้น ๆ ภาษาไทยถามผู้ดูแล (เช่น \"วัตถุสีส้มใกล้รั้วคืออะไรครับ อันตรายไหม\") ถ้ามั่นใจให้ uncertain=false และ question_th=null",
     "- verified: true ถ้าเห็นเหตุการณ์ที่ควรสนใจจริง (คน/รถ/การบุกรุก/สิ่งที่คำสั่งผู้ดูแลระบุ), false ถ้าเป็นการแจ้งเตือนหลอก (เงา แสง ฝน สัตว์เล็ก ต้นไม้ไหว)",
     "- severity: critical = อันตราย/บุกรุกชัดเจนหรือเหตุในรายการเฝ้าระวังเสมอ, warning = ควรให้เจ้าหน้าที่ตรวจสอบ, info = กิจกรรมปกติ",
     "- description_th: บรรยายสั้น 1 ประโยคภาษาไทย เจาะจงสิ่งที่เห็น เช่น จำนวนคน การแต่งกาย ทิศทางการเคลื่อนไหว",
@@ -121,6 +133,11 @@ function parseAnalysis(text: string, model: string): VlmAnalysis {
       typeof parsed.description_th === "string" ? parsed.description_th : "",
     label: typeof parsed.label === "string" ? parsed.label : null,
     model,
+    uncertain: parsed.uncertain === true,
+    question_th:
+      typeof parsed.question_th === "string" && parsed.question_th.trim() !== ""
+        ? parsed.question_th
+        : null,
   };
 }
 

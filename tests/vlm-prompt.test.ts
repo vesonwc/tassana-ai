@@ -37,6 +37,18 @@ describe("buildPrompt — three config layers (ADR-011)", () => {
     expect(prompt).toContain("ดูรถจอดขวางประตูหนีไฟ");
   });
 
+  it("layer 4 taught knowledge is injected and the ask-when-unsure schema is present", () => {
+    const prompt = buildPrompt({
+      ...BASE_CTX,
+      knowledge: ["บ้านนี้มีแมวส้ม 1 ตัว เดินแถวรั้วเป็นประจำ"],
+    });
+    expect(prompt).toContain("ความรู้เฉพาะไซต์นี้ที่ผู้ดูแลเคยสอนไว้");
+    expect(prompt).toContain("แมวส้ม");
+    expect(prompt).toContain('"uncertain"');
+    expect(prompt).toContain("question_th");
+    expect(buildPrompt(BASE_CTX)).not.toContain("ความรู้เฉพาะไซต์นี้");
+  });
+
   it("strict-hours context escalates wording only inside the window", () => {
     const strict = { start: "22:00", end: "06:00" };
     const night = buildPrompt({ ...BASE_CTX, strictHours: strict, nowBangkok: "02:14" });

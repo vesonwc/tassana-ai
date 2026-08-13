@@ -58,6 +58,49 @@ export async function saveSiteRules(formData: FormData): Promise<void> {
   redirect(`/dashboard/sites/${siteId}/settings?tab=alerts&saved=1`);
 }
 
+// Layer-4 knowledge (ADR-013): add/remove facts from the dashboard.
+export async function addKnowledge(formData: FormData): Promise<void> {
+  const siteId = String(formData.get("siteId") ?? "");
+  const fact = String(formData.get("fact") ?? "").trim();
+  if (!siteId || !fact) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("sites")
+    .select("id")
+    .eq("id", siteId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const service = getServiceClient();
+  await service.from("site_knowledge").insert({
+    site_id: siteId,
+    fact_th: fact,
+    source: "dashboard",
+  });
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=knowledge&saved=1`);
+}
+
+export async function deleteKnowledge(formData: FormData): Promise<void> {
+  const siteId = String(formData.get("siteId") ?? "");
+  const knowledgeId = String(formData.get("knowledgeId") ?? "");
+  if (!siteId || !knowledgeId) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("site_knowledge")
+    .select("id")
+    .eq("id", knowledgeId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const service = getServiceClient();
+  await service.from("site_knowledge").delete().eq("id", knowledgeId);
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=knowledge&saved=1`);
+}
+
 // Per-camera config (ADR-011): role profile, enable switch, and plain-Thai
 // instructions — all data, no deploy.
 export async function saveCameraConfig(formData: FormData): Promise<void> {

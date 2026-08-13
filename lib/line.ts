@@ -103,6 +103,33 @@ export async function pushLineMessage(
   }
 }
 
+// Reply within LINE's reply-token window (free, does not count as push).
+export async function replyLineMessage(
+  replyToken: string,
+  messages: Record<string, unknown>[],
+): Promise<{ ok: boolean; error?: string }> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN is not set" };
+  try {
+    const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ replyToken, messages }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      return { ok: false, error: `LINE reply HTTP ${response.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 export function buildDailyReportText(stats: {
   siteName: string;
   dateTh: string;

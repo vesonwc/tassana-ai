@@ -57,6 +57,7 @@ interface SiteRules {
 interface EventRow {
   event_id: string;
   site_id: string;
+  camera_id: string | null;
   event_type: string;
   occurred_at: string;
   media: { snapshot_path: string | null };
@@ -147,8 +148,21 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
   }
   const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
   const mime = blob.type || "image/jpeg";
-  // Assemble the three config layers (ADR-011) from data, not code.
+
+  // Layer 4 (ADR-013): everything humans have taught this site.
+  const { data: knowledgeRows } = await supabase
+    .from("site_knowledge")
+    .select("fact_th, camera_id")
+    .eq("site_id", row.site_id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const knowledge = (knowledgeRows ?? [])
+    .filter((k) => !k.camera_id || k.camera_id === row.camera_id)
+    .map((k) => k.fact_th);
+
+  // Assemble the four config layers (ADR-011/013) from data, not code.
   return analyzeWithFallback(base64, mime, {
+    knowledge,
     eventType: row.event_type,
     cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
     siteName: row.sites?.name ?? "ไม่ระบุไซต์",
@@ -172,7 +186,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "event_id, site_id, event_type, occurred_at, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, line_group_id, custom_instructions_th, rules)",
+      "event_id, site_id, camera_id, event_type, occurred_at, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, line_group_id, custom_instructions_th, rules)",
     )
     .eq("event_id", eventId)
     .maybeSingle();
@@ -215,7 +229,11 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
       console.log(
         `worker: ${eventId} → ${analysis.verified ? "จริง" : "หลอก"} [${analysis.severity}] ${analysis.description_th}`,
       );
-      await maybeSendLineAlert(row, analysis);
+      if (analysis.uncertain && analysis.question_th) {
+        await sendUncertainQuestion(row, analysis);
+      } else {
+        await maybeSendLineAlert(row, analysis);
+      }
     } else {
       // No snapshot to analyze — still stamp processed_at so reconciliation
       // knows this event is settled and never re-enqueues it.
@@ -566,6 +584,50 @@ async function maybeSendDailyReports(): Promise<void> {
     console.log(
       `worker: ☀️ daily report "${site.name}" ${reportDate} — ${result.ok ? "sent" : `failed: ${result.error}`}`,
     );
+  }
+}
+
+// ADR-013: the model is unsure — ask the humans instead of guessing, and
+// remember the answer forever via the LINE webhook teach-by-reply flow.
+async function sendUncertainQuestion(
+  row: EventRow,
+  analysis: VlmAnalysis,
+): Promise<void> {
+  try {
+    const to = row.sites?.line_group_id;
+    if (!to || !process.env.LINE_CHANNEL_ACCESS_TOKEN || !analysis.question_th) return;
+
+    let imageUrl: string | null = null;
+    if (row.media?.snapshot_path) {
+      const { data: signed } = await supabase.storage
+        .from("snapshots")
+        .createSignedUrl(row.media.snapshot_path, 86_400);
+      imageUrl = signed?.signedUrl ?? null;
+    }
+    const flex = buildAlertFlex({
+      severity: "warning",
+      eventTypeTh: "ระบบขอคำแนะนำ 🙋",
+      descriptionTh: `${analysis.question_th}\n\n💬 พิมพ์ตอบข้อความนี้ได้เลย — ระบบจะจำคำตอบไว้ใช้ตลอดไป`,
+      cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
+      siteName: row.sites?.name ?? "",
+      timeTh: `${new Date(row.occurred_at).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" })} น.`,
+      imageUrl,
+      dashboardUrl: `${APP_URL}/dashboard/sites/${row.site_id}`,
+    });
+    const sent = await pushLineMessage(to, [flex]);
+    if (sent.ok) {
+      await supabase.from("pending_questions").insert({
+        site_id: row.site_id,
+        event_id: row.event_id,
+        line_target: to,
+        question_th: analysis.question_th,
+      });
+      console.log(`worker: 🙋 asked human about ${row.event_id}: ${analysis.question_th}`);
+    } else {
+      console.error(`worker: question send failed: ${sent.error}`);
+    }
+  } catch (err) {
+    console.error("worker: question error", (err as Error).message);
   }
 }
 

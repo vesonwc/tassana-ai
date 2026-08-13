@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionClient, getUserAndProfile } from "@/lib/supabase-auth";
 import { formatThaiTime } from "@/lib/labels";
-import { saveCameraConfig, saveSiteRules } from "./actions";
+import { addKnowledge, deleteKnowledge, saveCameraConfig, saveSiteRules } from "./actions";
 import { rotateSiteKey, saveLineTarget } from "@/app/dashboard/admin/actions";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +54,7 @@ function TabBar({
   const tabs = [
     { key: "alerts", label: "🔔 การแจ้งเตือน" },
     { key: "cameras", label: `📷 กล้อง (${cameraCount})` },
+    { key: "knowledge", label: "🧠 ความรู้" },
     ...(isAdmin ? [{ key: "connect", label: "🔌 การเชื่อมต่อ" }] : []),
   ];
   return (
@@ -124,6 +125,14 @@ export default async function SiteSettingsPage({
     .select("id, name_th, description_th")
     .order("name_th");
   const cameraProfiles = profileRows ?? [];
+
+  const { data: knowledgeRows } = await supabase
+    .from("site_knowledge")
+    .select("id, fact_th, source, created_at, camera_id")
+    .eq("site_id", siteId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const knowledge = knowledgeRows ?? [];
 
   const rules = (site.rules ?? {}) as Rules;
   const alertOn = (key: string) => rules.alerts?.[key] ?? true;
@@ -256,6 +265,51 @@ export default async function SiteSettingsPage({
               </section>
             </form>
           ))}
+        </>
+      )}
+
+      {tab === "knowledge" && (
+        <>
+          <section style={box}>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>สิ่งที่ระบบเรียนรู้เกี่ยวกับที่นี่</h2>
+            <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+              เมื่อ AI ไม่แน่ใจ มันจะถามใน LINE — คำตอบของคุณถูกเก็บที่นี่ และใช้ประกอบการวิเคราะห์ทุกภาพต่อจากนี้ ลบได้ถ้าข้อมูลไม่จริงแล้ว
+            </p>
+            {knowledge.length === 0 && (
+              <p style={{ color: "#9E9E9E", fontSize: "0.9rem" }}>
+                ยังไม่มีความรู้ — รอ AI ถามคำถามแรกใน LINE หรือเพิ่มเองด้านล่าง
+              </p>
+            )}
+            {knowledge.map((k) => (
+              <div key={k.id} style={{ display: "flex", gap: "0.6rem", alignItems: "baseline", padding: "0.45rem 0", borderBottom: "1px solid #f0f1f3" }}>
+                <span style={{ flex: 1, fontSize: "0.95rem" }}>🧠 {k.fact_th}</span>
+                <span style={{ color: "#9E9E9E", fontSize: "0.75rem" }}>
+                  {k.source === "line_reply" ? "สอนผ่าน LINE" : k.source === "dashboard" ? "เพิ่มเอง" : "ระบบ"}
+                </span>
+                <form action={deleteKnowledge} style={{ margin: 0 }}>
+                  <input type="hidden" name="siteId" value={siteId} />
+                  <input type="hidden" name="knowledgeId" value={k.id} />
+                  <button style={{ fontSize: "0.8rem", padding: "0.2rem 0.7rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", color: "#C0392B", cursor: "pointer" }}>
+                    ลบ
+                  </button>
+                </form>
+              </div>
+            ))}
+          </section>
+
+          <section style={box}>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>เพิ่มความรู้เอง</h2>
+            <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+              พิมพ์ข้อเท็จจริงเกี่ยวกับที่นี่เป็นภาษาไทยธรรมดา เช่น "บ้านนี้มีแมวส้ม 1 ตัว เดินแถวรั้วเป็นประจำ" หรือ "รถกระบะขาวทะเบียน กข 1234 คือรถของบ้าน"
+            </p>
+            <form action={addKnowledge} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <input type="hidden" name="siteId" value={siteId} />
+              <input name="fact" required placeholder="พิมพ์ความรู้ใหม่..." style={{ ...inputStyle, flex: 1, minWidth: 240 }} />
+              <button style={{ padding: "0.5rem 1.3rem", borderRadius: 999, border: "none", background: "#00DE68", color: "#003D1C", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer" }}>
+                ➕ บันทึก
+              </button>
+            </form>
+          </section>
         </>
       )}
 
