@@ -606,9 +606,11 @@ async function main(): Promise<void> {
   setInterval(() => void maybeSendDailyReports(), 60_000);
   for (;;) {
     try {
+      // vt 30s: a failed VLM attempt retries in half a minute, not 1.5 — an
+      // intrusion alert cannot afford leisurely retries.
       const { data, error } = await supabase.rpc("dequeue_events", {
         p_limit: 5,
-        p_vt: 90,
+        p_vt: 30,
       });
       if (error) {
         console.error("worker: dequeue failed", error.message);
