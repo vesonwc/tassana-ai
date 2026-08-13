@@ -44,6 +44,9 @@ describe("buildPrompt — three config layers (ADR-011)", () => {
     });
     expect(prompt).toContain("ความรู้เฉพาะไซต์นี้ที่ผู้ดูแลเคยสอนไว้");
     expect(prompt).toContain("แมวส้ม");
+    // Taught knowledge must never be able to silence layer-1 alarms.
+    expect(prompt).toContain("ห้ามใช้เป็นเหตุยกเลิกการแจ้งรายการเฝ้าระวังเสมอ");
+    expect(prompt).toContain("ให้เชื่อภาพ");
     expect(prompt).toContain('"uncertain"');
     expect(prompt).toContain("question_th");
     expect(buildPrompt(BASE_CTX)).not.toContain("ความรู้เฉพาะไซต์นี้");
