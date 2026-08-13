@@ -132,8 +132,10 @@ export async function analyzeSnapshot(
 ): Promise<VlmAnalysis> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new VlmError("GEMINI_API_KEY is not set");
+  // Free-tier reality: lite has the roomier quota, so it leads; the bigger
+  // flash is the fallback. Swap via GEMINI_MODEL env when billing arrives.
   const model =
-    modelOverride ?? process.env.GEMINI_MODEL ?? "gemini-flash-latest";
+    modelOverride ?? process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";
 
   let response: Response;
   try {

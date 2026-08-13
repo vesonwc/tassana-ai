@@ -29,7 +29,7 @@ const MAX_ATTEMPTS = 5;
 const VLM_MIN_INTERVAL_MS = Number(process.env.VLM_MIN_INTERVAL_MS ?? 7_000);
 // Separate model = separate free-tier quota bucket; used when primary is 429ing.
 const VLM_FALLBACK_MODEL =
-  process.env.GEMINI_FALLBACK_MODEL ?? "gemini-flash-lite-latest";
+  process.env.GEMINI_FALLBACK_MODEL ?? "gemini-flash-latest";
 const HEARTBEAT_CHECK_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MIN = Number(process.env.HEARTBEAT_TIMEOUT_MIN ?? 10);
 
