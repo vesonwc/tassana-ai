@@ -22,11 +22,13 @@ export async function submitEventFeedback(formData: FormData): Promise<void> {
 
   const service = getServiceClient();
   const now = new Date().toISOString();
-  const { data: existing } = await service
+  const { data: existingRows } = await service
     .from("alerts")
     .select("id")
     .eq("event_id", eventId)
-    .maybeSingle();
+    .order("sent_at", { ascending: true, nullsFirst: false })
+    .limit(1);
+  const existing = existingRows?.[0] ?? null;
 
   if (existing) {
     await service

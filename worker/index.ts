@@ -408,6 +408,24 @@ async function maybeSendLineAlert(
   try {
     const to = row.sites?.line_group_id;
     if (!to || !process.env.LINE_CHANNEL_ACCESS_TOKEN) return;
+
+    // Alert-first follow-up: if the webhook already rang the raw bell, send the
+    // AI verdict as a short text — including the all-clear on false alarms.
+    const { data: prior } = await supabase
+      .from("alerts")
+      .select("id")
+      .eq("event_id", row.event_id)
+      .not("sent_at", "is", null)
+      .limit(1);
+    if ((prior?.length ?? 0) > 0) {
+      const text = analysis.verified
+        ? `🤖 ผลวิเคราะห์ (${row.cameras?.name ?? ""}): ${analysis.description_th}`
+        : `✅ AI ตรวจสอบแล้ว น่าจะเป็นการแจ้งเตือนหลอก: ${analysis.description_th}`;
+      const followup = await pushLineMessage(to, [{ type: "text", text }]);
+      if (!followup.ok) console.error(`worker: follow-up failed: ${followup.error}`);
+      return;
+    }
+
     if (!analysis.verified) return;
     const rules = row.sites?.rules ?? {};
     if (rules.alerts?.[row.event_type] === false) return;
@@ -592,6 +610,35 @@ async function reconcileStuckEvents(): Promise<void> {
   }
 }
 
+let draining = false;
+async function drainQueue(): Promise<void> {
+  if (draining) return;
+  draining = true;
+  try {
+    for (;;) {
+      // vt 30s: a failed VLM attempt retries in half a minute, not 1.5 — an
+      // intrusion alert cannot afford leisurely retries.
+      const { data, error } = await supabase.rpc("dequeue_events", {
+        p_limit: 5,
+        p_vt: 30,
+      });
+      if (error) {
+        console.error("worker: dequeue failed", error.message);
+        break;
+      }
+      const messages = (data ?? []) as QueueMessage[];
+      if (messages.length === 0) break;
+      for (const msg of messages) {
+        await handleMessage(msg);
+      }
+    }
+  } catch (err) {
+    console.error("worker: drain error", (err as Error).message);
+  } finally {
+    draining = false;
+  }
+}
+
 async function main(): Promise<void> {
   console.log("tassana-ai worker: started (pgmq → Gemini → events.ai)");
   void checkHeartbeats();
@@ -604,28 +651,22 @@ async function main(): Promise<void> {
   setInterval(() => void pulseSystemStatus(), 60_000);
   void maybeSendDailyReports();
   setInterval(() => void maybeSendDailyReports(), 60_000);
+
+  // Push wake (requires the events table in the realtime publication): a new
+  // event nudges the worker instantly instead of waiting out the poll cycle.
+  supabase
+    .channel("events-wake")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "events" },
+      () => void drainQueue(),
+    )
+    .subscribe((status) => console.log(`worker: realtime wake ${status}`));
+
+  // Polling stays as the safety net.
   for (;;) {
-    try {
-      // vt 30s: a failed VLM attempt retries in half a minute, not 1.5 — an
-      // intrusion alert cannot afford leisurely retries.
-      const { data, error } = await supabase.rpc("dequeue_events", {
-        p_limit: 5,
-        p_vt: 30,
-      });
-      if (error) {
-        console.error("worker: dequeue failed", error.message);
-        await sleep(POLL_INTERVAL_MS * 2);
-        continue;
-      }
-      const messages = (data ?? []) as QueueMessage[];
-      for (const msg of messages) {
-        await handleMessage(msg);
-      }
-      await sleep(messages.length > 0 ? 500 : POLL_INTERVAL_MS);
-    } catch (err) {
-      console.error("worker: loop error", (err as Error).message);
-      await sleep(POLL_INTERVAL_MS * 2);
-    }
+    await drainQueue();
+    await sleep(POLL_INTERVAL_MS);
   }
 }
 
