@@ -19,6 +19,36 @@ export interface NormalizeContext {
   receivedAt: string; // ISO8601
 }
 
+// Real NVRs speak XML (EventNotificationAlert). Tolerant tag extraction beats
+// strict parsing here — firmware variants differ, and we keep the full raw
+// XML anyway (ADR-008) so nothing is ever lost to a format surprise.
+const XML_FIELDS = [
+  "eventType",
+  "eventState",
+  "dateTime",
+  "channelID",
+  "dynChannelID",
+  "channelName",
+  "activePostCount",
+  "eventDescription",
+  "ipAddress",
+  "macAddress",
+] as const;
+
+export function parseHikvisionXml(xml: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { test_source: "hikvision_isapi" };
+  for (const field of XML_FIELDS) {
+    const match = xml.match(new RegExp(`<${field}>([^<]*)</${field}>`, "i"));
+    if (match && match[1].trim() !== "") out[field] = match[1].trim();
+  }
+  out._raw_xml = xml.slice(0, 10_000);
+  return out;
+}
+
+export function looksLikeHikvisionXml(body: string): boolean {
+  return /<EventNotificationAlert/i.test(body);
+}
+
 function asString(value: unknown): string | null {
   if (typeof value === "string" && value.trim() !== "") return value.trim();
   if (typeof value === "number") return String(value);

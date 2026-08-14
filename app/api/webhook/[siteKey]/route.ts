@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { detectSourceType, extractCameraRef, normalizeEvent } from "@/lib/normalize";
+import {
+  looksLikeHikvisionXml,
+  parseHikvisionXml,
+} from "@/lib/normalizers/hikvision";
 import { buildAlertFlex, pushLineMessage } from "@/lib/line";
 import { TYPE_TH } from "@/lib/labels";
 import type { EventType } from "@/lib/types";
@@ -38,13 +42,41 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Real NVRs post XML (sometimes multipart with a JPEG attached); test tools
+  // post JSON. Accept all three — rule #3: never reject what a camera says.
   let payload: Record<string, unknown>;
+  let attachedImage: Buffer | null = null;
+  const contentType = request.headers.get("content-type") ?? "";
   try {
-    const body = await request.json();
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      throw new Error("payload must be a JSON object");
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      let xmlText = "";
+      for (const [, value] of form.entries()) {
+        if (typeof value === "string") {
+          if (looksLikeHikvisionXml(value)) xmlText = value;
+        } else {
+          const buf = Buffer.from(await value.arrayBuffer());
+          if (value.type.startsWith("image/") || value.name?.match(/\.jpe?g$/i)) {
+            attachedImage = buf;
+          } else if (looksLikeHikvisionXml(buf.toString("utf8"))) {
+            xmlText = buf.toString("utf8");
+          }
+        }
+      }
+      if (!xmlText) throw new Error("multipart without recognizable XML part");
+      payload = parseHikvisionXml(xmlText);
+    } else {
+      const bodyText = await request.text();
+      if (looksLikeHikvisionXml(bodyText)) {
+        payload = parseHikvisionXml(bodyText);
+      } else {
+        const body = JSON.parse(bodyText);
+        if (body === null || typeof body !== "object" || Array.isArray(body)) {
+          throw new Error("payload must be a JSON object");
+        }
+        payload = body as Record<string, unknown>;
+      }
     }
-    payload = body as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "invalid_payload" }, { status: 400 });
   }
@@ -114,6 +146,20 @@ export async function POST(
     cameraId,
     receivedAt,
   });
+
+  // NVR attached a snapshot in the multipart body — store it so the VLM and
+  // dashboard get the image without a separate fetch-from-camera step.
+  if (attachedImage && !event.media.snapshot_path) {
+    const path = `hik/${site.id}/${Date.now()}.jpg`;
+    const { error: uploadError } = await supabase.storage
+      .from("snapshots")
+      .upload(path, attachedImage, { contentType: "image/jpeg" });
+    if (uploadError) {
+      console.error("webhook: attached image upload failed", uploadError.message);
+    } else {
+      event.media.snapshot_path = path;
+    }
+  }
 
   // Idempotency: the partial unique index (site_id, source_type, source_raw_id)
   // rejects re-posts of the same device alarm; PostgREST upsert cannot target a
