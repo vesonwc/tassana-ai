@@ -203,6 +203,36 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
     return;
   }
 
+  // Busy-scene shortcut: if this camera was judged "ปกติ (info)" moments ago
+  // for the same event type, inherit that verdict instead of paying for a
+  // fresh look. Serious types always get analyzed.
+  const SERIOUS = new Set(["intrusion", "line_crossing", "loitering", "camera_offline"]);
+  if (row.camera_id && !SERIOUS.has(row.event_type)) {
+    const since = new Date(Date.now() - 10 * 60_000).toISOString();
+    const { data: recent } = await supabase
+      .from("events")
+      .select("ai")
+      .eq("camera_id", row.camera_id)
+      .eq("event_type", row.event_type)
+      .gte("occurred_at", since)
+      .not("ai->>processed_at", "is", null)
+      .neq("event_id", eventId)
+      .order("occurred_at", { ascending: false })
+      .limit(1);
+    const prior = recent?.[0]?.ai as AiResult | undefined;
+    if (prior && prior.verified === true && prior.severity === "info" && prior.description_th) {
+      await updateAi(eventId, {
+        verified: true,
+        severity: "info",
+        description_th: `${prior.description_th} (สืบเนื่องจากเหตุก่อนหน้า)`,
+        model: `${prior.model ?? "?"}+inherit`,
+        processed_at: new Date().toISOString(),
+      });
+      await ack(msg.msg_id);
+      return;
+    }
+  }
+
   // Camera switched off (ADR-011): keep the event, skip paid analysis.
   if (row.cameras?.enabled === false) {
     await updateAi(eventId, {

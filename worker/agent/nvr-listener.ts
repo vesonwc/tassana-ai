@@ -23,8 +23,41 @@ const USER = process.env.NVR_USER ?? "admin";
 const PASS = process.env.NVR_PASSWORD ?? "";
 const WEBHOOK = process.env.NVR_WEBHOOK_URL ?? "";
 const HEARTBEAT_EVERY_MS = 5 * 60_000;
-// Same alarm re-posted within this window is one event to us.
-const DEDUPE_MS = Number(process.env.NVR_DEDUPE_MS ?? 20_000);
+// Per-channel cooldown. Busy office hours: motion fires nonstop while people
+// simply work — one look every few minutes is plenty. Off-hours: react fast.
+const COOLDOWN_BUSY_MS = Number(process.env.NVR_COOLDOWN_BUSY_MS ?? 3 * 60_000);
+const COOLDOWN_QUIET_MS = Number(process.env.NVR_COOLDOWN_QUIET_MS ?? 30_000);
+const BUSY_START = process.env.NVR_BUSY_START ?? "08:00";
+const BUSY_END = process.env.NVR_BUSY_END ?? "19:00";
+// Frames that barely changed since the last one we sent are not worth a call.
+const MIN_FRAME_DIFF_PCT = Number(process.env.NVR_MIN_FRAME_DIFF ?? 4);
+
+function bangkokHHmm(): string {
+  return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
+}
+function isBusyHours(): boolean {
+  const now = bangkokHHmm();
+  const day = new Date().toLocaleDateString("en-US", { timeZone: "Asia/Bangkok", weekday: "short" });
+  if (day === "Sat" || day === "Sun") return false;
+  return now >= BUSY_START && now < BUSY_END;
+}
+
+// Cheap similarity: compare downscaled JPEG byte histograms. Not vision, but
+// enough to skip "same people at same desks" frames without any dependency.
+function frameDiffPct(a: Buffer, b: Buffer): number {
+  const bins = 64;
+  const ha = new Array<number>(bins).fill(0);
+  const hb = new Array<number>(bins).fill(0);
+  const stepA = Math.max(1, Math.floor(a.length / 20_000));
+  const stepB = Math.max(1, Math.floor(b.length / 20_000));
+  for (let i = 0; i < a.length; i += stepA) ha[a[i] >> 2] += 1;
+  for (let i = 0; i < b.length; i += stepB) hb[b[i] >> 2] += 1;
+  const na = ha.reduce((s, v) => s + v, 0) || 1;
+  const nb = hb.reduce((s, v) => s + v, 0) || 1;
+  let diff = 0;
+  for (let i = 0; i < bins; i++) diff += Math.abs(ha[i] / na - hb[i] / nb);
+  return (diff / 2) * 100;
+}
 
 if (!HOST || !PASS || !WEBHOOK) {
   console.error(
@@ -126,6 +159,9 @@ function fetchBuffer(path: string): Promise<{ status: number; body: Buffer; type
 
 // ---------------------------------------------------------------- forwarding
 const lastSeen = new Map<string, number>();
+const lastFrame = new Map<string, Buffer>();
+let skippedCooldown = 0;
+let skippedSimilar = 0;
 
 function xmlField(xml: string, tag: string): string {
   return xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, "i"))?.[1]?.trim() ?? "";
@@ -142,8 +178,13 @@ async function forwardEvent(xml: string): Promise<void> {
   if (state && state.toLowerCase() !== "active") return;
   const key = `${eventType}:${channel}`;
   const now = Date.now();
-  if (now - (lastSeen.get(key) ?? 0) < DEDUPE_MS) return;
-  lastSeen.set(key, now);
+  // Serious events (line crossing / intrusion) always get through fast.
+  const serious = /linedetection|fielddetection|intrusion/i.test(eventType);
+  const cooldown = serious ? COOLDOWN_QUIET_MS : isBusyHours() ? COOLDOWN_BUSY_MS : COOLDOWN_QUIET_MS;
+  if (now - (lastSeen.get(key) ?? 0) < cooldown) {
+    skippedCooldown += 1;
+    return;
+  }
 
   // Grab a fresh frame from that channel's main stream.
   let image: Buffer | null = null;
@@ -153,6 +194,18 @@ async function forwardEvent(xml: string): Promise<void> {
   } catch (err) {
     console.warn(`nvr-listener: snapshot ch${channel} failed:`, (err as Error).message);
   }
+
+  // Same scene as last time we sent for this channel? Not worth an AI call.
+  if (image && !serious) {
+    const prev = lastFrame.get(channel);
+    if (prev && frameDiffPct(prev, image) < MIN_FRAME_DIFF_PCT) {
+      skippedSimilar += 1;
+      lastSeen.set(key, now); // still counts as "seen" so we don't spin
+      return;
+    }
+    lastFrame.set(channel, image);
+  }
+  lastSeen.set(key, now);
 
   const form = new FormData();
   form.append("event", new Blob([xml], { type: "application/xml" }), "event.xml");
@@ -235,7 +288,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   subscribe();
-  setInterval(() => console.log("nvr-listener: alive"), HEARTBEAT_EVERY_MS);
+  setInterval(() => {
+    console.log(
+      `nvr-listener: alive — ${isBusyHours() ? "เวลางาน (cooldown 3 นาที/ช่อง)" : "นอกเวลางาน (cooldown 30 วิ)"} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
+    );
+  }, HEARTBEAT_EVERY_MS);
 }
 
 void main();
