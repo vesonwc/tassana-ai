@@ -83,6 +83,22 @@ export async function POST(
 
   const receivedAt = new Date().toISOString();
 
+  // Liveness pulse from an on-site listener: "NVR answers, these channels
+  // return frames". Refreshes heartbeats only — no event row, no queue.
+  // Presence ≠ activity: a quiet camera is not a dead camera.
+  if (payload.heartbeat === true && Array.isArray(payload.channels)) {
+    const channels = (payload.channels as unknown[]).map(String);
+    await supabase.from("sites").update({ heartbeat_at: receivedAt }).eq("id", site.id);
+    if (channels.length > 0) {
+      await supabase
+        .from("cameras")
+        .update({ last_event_at: receivedAt })
+        .eq("site_id", site.id)
+        .in("source_camera_ref", channels);
+    }
+    return NextResponse.json({ ok: true, heartbeat: true, channels: channels.length });
+  }
+
   // Any webhook hit proves the site link is alive.
   void supabase
     .from("sites")

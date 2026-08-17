@@ -178,6 +178,7 @@ async function forwardEvent(xml: string): Promise<void> {
   if (state && state.toLowerCase() !== "active") return;
   const key = `${eventType}:${channel}`;
   const now = Date.now();
+  PULSE_CHANNELS.add(Number(channel));
   // Serious events (line crossing / intrusion) always get through fast.
   const serious = /linedetection|fielddetection|intrusion/i.test(eventType);
   const cooldown = serious ? COOLDOWN_QUIET_MS : isBusyHours() ? COOLDOWN_BUSY_MS : COOLDOWN_QUIET_MS;
@@ -220,6 +221,32 @@ async function forwardEvent(xml: string): Promise<void> {
     );
   } catch (err) {
     console.error("nvr-listener: forward failed:", (err as Error).message);
+  }
+}
+
+// ---------------------------------------------------------------- liveness pulse
+// "No events" is not "camera dead" — a quiet room is quiet. Real liveness is
+// "the NVR still answers and this channel still returns a frame". Pulse that
+// to the cloud every minute so heartbeat judges presence, not activity.
+const PULSE_CHANNELS = new Set<number>();
+async function pulseLiveness(): Promise<void> {
+  const alive: number[] = [];
+  for (const ch of PULSE_CHANNELS) {
+    try {
+      const pic = await fetchBuffer(`/ISAPI/Streaming/channels/${ch}01/picture`);
+      if (pic.status === 200 && pic.body.length > 1000) alive.push(ch);
+    } catch {
+      // channel down or NVR unreachable — simply not in the alive list
+    }
+  }
+  try {
+    await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ test_source: "hikvision_isapi", heartbeat: true, channels: alive }),
+    });
+  } catch (err) {
+    console.warn("nvr-listener: pulse failed:", (err as Error).message);
   }
 }
 
@@ -329,6 +356,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   subscribe();
+  for (const ch of PATROL_CHANNELS) PULSE_CHANNELS.add(ch);
+  setInterval(() => void pulseLiveness(), 60_000);
   if (PATROL_CHANNELS.length > 0) {
     console.log(`nvr-listener: ตรวจเวรดึกเปิดใช้ — กล้อง ${PATROL_CHANNELS.join(",")} เวลา ${PATROL_TIMES.join(", ")}`);
     setInterval(patrolTick, 30_000);
