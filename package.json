@@ -12,6 +12,8 @@
     "worker:dev": "tsx watch worker/index.ts",
     "worker:start": "tsx worker/index.ts",
     "agent:pocket3": "tsx worker/agent/capture.ts",
+    "agent:nvr": "tsx worker/agent/nvr-listener.ts",
+    "agent:relay": "tsx worker/agent/relay.ts",
     "test:ai": "tsx worker/tools/accuracy-test.ts",
     "test": "vitest run",
     "test:watch": "vitest"
