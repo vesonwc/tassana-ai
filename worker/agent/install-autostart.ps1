@@ -21,11 +21,24 @@ timeout /t 15 /nobreak > nul
 goto loop
 "@ | Set-Content -Path $wrapper -Encoding ASCII
 
-$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$wrapper`"" -WorkingDirectory $projectDir
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
-Register-ScheduledTask -TaskName "TassanaNvrListener" -Action $action -Trigger $trigger -Settings $settings -Description "Tassana AI - NVR listener (on-site bridge)" -Force | Out-Null
+# Launch the wrapper through wscript with window style 0 = fully hidden. Otherwise
+# Windows 11 opens the cmd loop as a visible Windows Terminal tab that a user can close by accident.
+$launcher = Join-Path $projectDir "worker\agent\run-nvr-listener-hidden.vbs"
+@"
+Set sh = CreateObject("WScript.Shell")
+sh.Run """$wrapper""", 0, False
+"@ | Set-Content -Path $launcher -Encoding ASCII
 
-Write-Host "ติดตั้งแล้ว: listener จะสตาร์ทเองทุกครั้งที่ล็อกอิน Windows"
+# Stop any previous instance (old visible window) before re-registering.
+Unregister-ScheduledTask -TaskName "TassanaNvrListener" -Confirm:$false -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "name='cmd.exe'" | Where-Object { $_.CommandLine -like "*run-nvr-listener.cmd*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-CimInstance Win32_Process -Filter "name='node.exe'" | Where-Object { $_.CommandLine -like "*nvr-listener*" -or $_.CommandLine -like "*agent:nvr*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$launcher`"" -WorkingDirectory $projectDir
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "TassanaNvrListener" -Action $action -Trigger $trigger -Settings $settings -Description "Tassana AI - NVR listener (on-site bridge, hidden window)" -Force | Out-Null
+
+Write-Host "ติดตั้งแล้ว: listener จะสตาร์ทเองทุกครั้งที่ล็อกอิน Windows (ทำงานเบื้องหลัง ไม่มีหน้าต่าง)"
 Write-Host "log อยู่ที่ $logDir\nvr-listener.log"
 Write-Host "เริ่มทันทีเลย: Start-ScheduledTask -TaskName TassanaNvrListener"
