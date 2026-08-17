@@ -4,6 +4,7 @@ import { getSessionClient } from "@/lib/supabase-auth";
 import { ALARM_TYPES, formatThaiTime, TYPE_TH } from "@/lib/labels";
 import type { EventType } from "@/lib/types";
 import { reanalyzeEvent, submitEventFeedback } from "./actions";
+import { AutoRefresh } from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -96,9 +97,12 @@ export default async function SiteEventsPage({
         >
           📊 รายงาน
         </Link>
-        <Link href="/dashboard" style={{ fontSize: "0.9rem", color: "#9E9E9E", marginLeft: "auto" }}>
-          ← ทุกโครงการ
-        </Link>
+        <span style={{ marginLeft: "auto", display: "flex", gap: "0.9rem", alignItems: "baseline" }}>
+          <AutoRefresh seconds={30} />
+          <Link href="/dashboard" style={{ fontSize: "0.9rem", color: "#9E9E9E" }}>
+            ← ทุกโครงการ
+          </Link>
+        </span>
       </div>
 
       <form
