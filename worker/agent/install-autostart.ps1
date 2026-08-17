@@ -1,4 +1,4 @@
-# Registers the NVR listener to start automatically at Windows logon on this PC.
+﻿# Registers the NVR listener to start automatically at Windows logon on this PC.
 # Run once in PowerShell (as the user who stays logged in):
 #   powershell -ExecutionPolicy Bypass -File worker\agent\install-autostart.ps1
 # Remove later with:  Unregister-ScheduledTask -TaskName "TassanaNvrListener" -Confirm:$false
