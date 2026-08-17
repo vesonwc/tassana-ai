@@ -6,6 +6,9 @@
 # writes .env, tests the connection, and registers autostart.
 
 $ErrorActionPreference = "Stop"
+# Fresh Windows PCs ship with ExecutionPolicy=Restricted, which blocks npm.ps1/npx.ps1.
+# Allow scripts for this process only (no permanent change), and call the .cmd shims explicitly.
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
 $Repo = "https://github.com/vesonwc/tassana-ai.git"
 $Dir  = "C:\Tassana ai"
 
@@ -31,7 +34,8 @@ if (Test-Path "$Dir\.git") {
 Write-Host "   โค้ดอยู่ที่ $Dir"
 
 Say "3/6 ติดตั้งไลบรารี (รอสักครู่)"
-npm install --no-audit --no-fund --silent
+& npm.cmd install --no-audit --no-fund --silent
+if ($LASTEXITCODE -ne 0) { throw "npm install ล้มเหลว (exit $LASTEXITCODE)" }
 Write-Host "   เสร็จ"
 
 Say "4/6 ตั้งค่า"
@@ -56,7 +60,7 @@ NVR_BUSY_END=19:00
 Write-Host "   บันทึก .env แล้ว (อยู่ในเครื่องนี้เท่านั้น)"
 
 Say "5/6 ทดสอบต่อ DVR"
-$test = Start-Process -FilePath "npx" -ArgumentList "tsx","worker/tools/nvr-probe.ts" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\tassana-probe.txt"
+$test = Start-Process -FilePath "npx.cmd" -ArgumentList "tsx","worker/tools/nvr-probe.ts" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\tassana-probe.txt"
 $out = Get-Content "$env:TEMP\tassana-probe.txt" -Raw
 if ($out -match "เปิด") { Write-Host "   ✅ ต่อ DVR ได้ รหัสถูกต้อง" -ForegroundColor Green } else { Write-Host "   ⚠️ ต่อ DVR ไม่ได้ — เช็ก IP/รหัส แล้วรันสคริปต์ใหม่" -ForegroundColor Yellow; Write-Host $out; exit 1 }
 
