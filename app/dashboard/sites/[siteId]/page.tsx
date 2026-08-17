@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getSessionClient } from "@/lib/supabase-auth";
 import { ALARM_TYPES, formatThaiTime, TYPE_TH } from "@/lib/labels";
 import type { EventType } from "@/lib/types";
-import { reanalyzeEvent, submitEventFeedback } from "./actions";
+import { reanalyzeEvent, submitEventFeedback, teachFromEvent } from "./actions";
 import { AutoRefresh } from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
@@ -235,16 +235,42 @@ export default async function SiteEventsPage({
                   ) : feedback === "confirmed" ? (
                     <span style={{ color: "#009E4A", fontSize: "0.85rem" }}>✓ ยืนยันว่าเป็นเหตุจริงแล้ว</span>
                   ) : (
-                    <form action={submitEventFeedback} style={{ display: "inline-flex", gap: "0.4rem" }}>
-                      <input type="hidden" name="eventId" value={ev.event_id} />
-                      <input type="hidden" name="siteId" value={siteId} />
-                      <button name="feedback" value="false_alarm" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
-                        แจ้งเท็จ
-                      </button>
-                      <button name="feedback" value="confirmed" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
-                        เหตุจริง
-                      </button>
-                    </form>
+                    <>
+                      <form action={submitEventFeedback} style={{ display: "inline-flex", gap: "0.4rem" }}>
+                        <input type="hidden" name="eventId" value={ev.event_id} />
+                        <input type="hidden" name="siteId" value={siteId} />
+                        <button name="feedback" value="false_alarm" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
+                          แจ้งเท็จ
+                        </button>
+                        <button name="feedback" value="confirmed" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
+                          เหตุจริง
+                        </button>
+                      </form>
+                      {ev.ai?.verified === true && (ev.ai.severity === "warning" || ev.ai.severity === "critical") && (
+                      <details style={{ marginTop: 6 }}>
+                        <summary style={{ fontSize: "0.85rem", color: "#009E4A", cursor: "pointer", fontWeight: 500 }}>
+                          ✏️ ไม่ผิดปกติ? สอนระบบว่าจริง ๆ แล้วคืออะไร
+                        </summary>
+                        <form action={teachFromEvent} style={{ display: "flex", gap: "0.4rem", marginTop: 6, flexWrap: "wrap" }}>
+                          <input type="hidden" name="eventId" value={ev.event_id} />
+                          <input type="hidden" name="siteId" value={siteId} />
+                          <input
+                            name="fact"
+                            required
+                            minLength={3}
+                            placeholder='เช่น "รถที่จอดฝั่งซ้ายเป็นที่จอดบ้านข้าง ๆ ไม่ได้ขวางทางเรา"'
+                            style={{ flex: 1, minWidth: 240, padding: "0.4rem 0.6rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.9rem", fontFamily: "inherit" }}
+                          />
+                          <button style={{ fontSize: "0.85rem", padding: "0.4rem 1rem", borderRadius: 999, border: "none", background: "#1D1D1F", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                            บันทึกความรู้
+                          </button>
+                        </form>
+                        <div style={{ fontSize: "0.75rem", color: "#9E9E9E", marginTop: 4 }}>
+                          ระบบจะจำไว้สำหรับกล้องนี้ตลอดไป (ดู/แก้ได้ที่แท็บ 🧠) และนับเหตุนี้เป็นแจ้งเท็จ
+                        </div>
+                      </details>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

@@ -48,6 +48,57 @@ export async function submitEventFeedback(formData: FormData): Promise<void> {
   revalidatePath(`/dashboard/sites/${siteId}`);
 }
 
+// Teach right where the mistake is (ADR-013): a note typed on an event becomes
+// permanent camera-scoped knowledge and marks the event as a false alarm.
+export async function teachFromEvent(formData: FormData): Promise<void> {
+  const eventId = String(formData.get("eventId") ?? "");
+  const siteId = String(formData.get("siteId") ?? "");
+  const fact = String(formData.get("fact") ?? "").trim();
+  if (!eventId || !siteId || fact.length < 3) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("events")
+    .select("event_id, camera_id")
+    .eq("event_id", eventId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const service = getServiceClient();
+  await service.from("site_knowledge").insert({
+    site_id: siteId,
+    camera_id: visible.camera_id ?? null,
+    fact_th: fact,
+    source: "dashboard",
+  });
+
+  // Teaching on an event implies "this one was judged wrong" — record it.
+  const now = new Date().toISOString();
+  const { data: existingRows } = await service
+    .from("alerts")
+    .select("id")
+    .eq("event_id", eventId)
+    .order("sent_at", { ascending: true, nullsFirst: false })
+    .limit(1);
+  const existing = existingRows?.[0] ?? null;
+  if (existing) {
+    await service
+      .from("alerts")
+      .update({ feedback: "false_alarm", feedback_by: "dashboard", feedback_at: now })
+      .eq("id", existing.id);
+  } else {
+    await service.from("alerts").insert({
+      event_id: eventId,
+      channel: "line",
+      feedback: "false_alarm",
+      feedback_by: "dashboard",
+      feedback_at: now,
+    });
+  }
+
+  revalidatePath(`/dashboard/sites/${siteId}`);
+}
+
 // Manual retry for events whose analysis failed (fail-open, ADR-005): reset
 // the ai block and push the event back onto the queue.
 export async function reanalyzeEvent(formData: FormData): Promise<void> {
