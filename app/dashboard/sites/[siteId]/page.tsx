@@ -38,7 +38,10 @@ export default async function SiteEventsPage({
   searchParams: Promise<{ days?: string; camera?: string; type?: string; view?: string }>;
 }) {
   const { siteId } = await params;
-  const { days = "1", camera = "", type = "", view = "" } = await searchParams;
+  // Default view is "what needs attention": a quiet screen means "watching,
+  // nothing wrong" — normal events are kept (stats, liveness, training) but
+  // folded away so they never bury the ones that matter.
+  const { days = "1", camera = "", type = "", view = "attention" } = await searchParams;
 
   const supabase = await getSessionClient();
 
@@ -77,7 +80,20 @@ export default async function SiteEventsPage({
   }
 
   const { data } = await query;
-  const events = (data ?? []) as unknown as EventRow[];
+  const allEvents = (data ?? []) as unknown as EventRow[];
+
+  // "attention" = abnormal + pending analysis + failed analysis + camera_offline
+  // + anything the AI filtered as false alarm is hidden too. Normal (verified
+  // info) events collapse into one summary line.
+  const isNormal = (ev: EventRow) =>
+    ev.ai?.verified === true && ev.ai.severity === "info";
+  const isFilteredFalse = (ev: EventRow) => ev.ai?.verified === false;
+  const normalEvents = view === "attention" ? allEvents.filter(isNormal) : [];
+  const filteredCount = view === "attention" ? allEvents.filter(isFilteredFalse).length : 0;
+  const events =
+    view === "attention"
+      ? allEvents.filter((ev) => !isNormal(ev) && !isFilteredFalse(ev))
+      : allEvents;
   // No inline images by design — the list stays a few KB and renders instantly;
   // each photo is fetched on demand via the snapshot route.
 
@@ -133,8 +149,9 @@ export default async function SiteEventsPage({
           ))}
         </select>
         <select name="view" defaultValue={view} style={{ padding: "0.45rem", borderRadius: 8, border: "1px solid #ccd0d5", fontSize: "0.95rem" }}>
-          <option value="">แสดงทั้งหมด</option>
+          <option value="attention">👀 ที่ควรสนใจ (ค่าเริ่มต้น)</option>
           <option value="abnormal">🔴 เฉพาะผิดปกติ</option>
+          <option value="all">แสดงทั้งหมด</option>
         </select>
         <button
           type="submit"
@@ -144,8 +161,35 @@ export default async function SiteEventsPage({
         </button>
       </form>
 
-      {events.length === 0 && (
+      {view === "attention" && events.length === 0 && (
+        <div style={{ background: "rgba(0,222,104,0.12)", color: "#009E4A", borderRadius: 16, padding: "1rem 1.2rem", fontWeight: 600, marginBottom: "0.8rem" }}>
+          🟢 ไม่มีเรื่องที่ต้องสนใจในช่วงนี้ — ระบบเฝ้าดูอยู่ ทุกอย่างปกติ
+        </div>
+      )}
+      {view !== "attention" && events.length === 0 && (
         <p style={{ color: "#9E9E9E" }}>ไม่มีเหตุการณ์ในช่วงที่เลือก</p>
+      )}
+
+      {view === "attention" && (normalEvents.length > 0 || filteredCount > 0) && (
+        <details style={{ background: "#fff", borderRadius: 16, padding: "0.7rem 1rem", marginBottom: "0.8rem" }}>
+          <summary style={{ cursor: "pointer", color: "#9E9E9E", fontSize: "0.9rem" }}>
+            🟢 ปกติ {normalEvents.length} รายการ
+            {filteredCount > 0 && ` · กรองแจ้งเตือนหลอกออก ${filteredCount} รายการ`}
+            {" "}— กดเพื่อดู
+          </summary>
+          <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            {normalEvents.map((ev) => (
+              <div key={ev.event_id} style={{ fontSize: "0.85rem", color: "#667", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ color: "#9E9E9E" }}>{formatThaiTime(ev.occurred_at)}</span>
+                <span>{ev.cameras?.name ?? "?"}</span>
+                <span style={{ color: "#1D1D1F" }}>{ev.ai?.description_th?.replace(/(\s*\(สืบเนื่องจากเหตุก่อนหน้า\))+$/g, "")}</span>
+                {ev.media?.snapshot_path && (
+                  <a href={`/dashboard/sites/${siteId}/snapshot/${ev.event_id}`} target="_blank" rel="noreferrer" style={{ color: "#009E4A" }}>📷</a>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.7rem" }}>
