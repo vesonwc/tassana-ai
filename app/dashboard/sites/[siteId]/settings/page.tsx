@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionClient, getUserAndProfile } from "@/lib/supabase-auth";
 import { formatThaiTime } from "@/lib/labels";
-import { addKnowledge, deleteKnowledge, saveCameraConfig, saveSiteRules } from "./actions";
+import { addKnowledge, deleteKnowledge, saveBaseline, saveCameraConfig, saveSiteRules } from "./actions";
 import { rotateSiteKey, saveLineTarget } from "@/app/dashboard/admin/actions";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +133,16 @@ export default async function SiteSettingsPage({
     .order("created_at", { ascending: false })
     .limit(100);
   const knowledge = knowledgeRows ?? [];
+
+  // Layer 5 (ADR-014): what the system taught itself, per camera.
+  const cameraIds = cameras.map((c) => c.id);
+  const { data: baselineRows } = cameraIds.length
+    ? await supabase
+        .from("camera_baselines")
+        .select("camera_id, baseline_th, sample_count, locked, updated_at")
+        .in("camera_id", cameraIds)
+    : { data: [] as { camera_id: string; baseline_th: string; sample_count: number; locked: boolean; updated_at: string }[] };
+  const baselines = new Map((baselineRows ?? []).map((b) => [b.camera_id, b]));
 
   const rules = (site.rules ?? {}) as Rules;
   const alertOn = (key: string) => rules.alerts?.[key] ?? true;
@@ -271,7 +281,46 @@ export default async function SiteSettingsPage({
       {tab === "knowledge" && (
         <>
           <section style={box}>
-            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>สิ่งที่ระบบเรียนรู้เกี่ยวกับที่นี่</h2>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>🤖 สิ่งที่ระบบเรียนรู้เองว่า "ปกติ" ของแต่ละกล้อง</h2>
+            <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
+              ทุกเช้า 05:00 ระบบสรุปจากเหตุการณ์ปกติ 7 วันล่าสุดของแต่ละกล้องเอง — แก้ข้อความได้ (ระบบจะไม่เขียนทับข้อความที่คุณแก้) และใช้ลดการรบกวน แต่ไม่มีวันปิดการแจ้งเหตุร้ายแรง
+            </p>
+            {cameras.filter((c) => c.enabled !== false).map((cam) => {
+              const b = baselines.get(cam.id);
+              return (
+                <form key={cam.id} action={saveBaseline} style={{ padding: "0.5rem 0", borderBottom: "1px solid #f0f1f3" }}>
+                  <input type="hidden" name="siteId" value={siteId} />
+                  <input type="hidden" name="cameraId" value={cam.id} />
+                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <strong style={{ fontSize: "0.95rem" }}>{cam.name}</strong>
+                    <span style={{ color: "#9E9E9E", fontSize: "0.75rem" }}>
+                      {b ? `จาก ${b.sample_count} ตัวอย่าง · ${formatThaiTime(b.updated_at)}${b.locked ? " · 🔒 แก้เองแล้ว" : ""}` : "ยังไม่มีข้อมูลพอ (ต้องมีเหตุปกติอย่างน้อย 10 รายการ)"}
+                    </span>
+                  </div>
+                  <textarea
+                    name="baseline"
+                    defaultValue={b?.baseline_th ?? ""}
+                    rows={3}
+                    placeholder="ระบบจะเติมให้เองเมื่อมีข้อมูลพอ หรือพิมพ์เองได้เลย"
+                    style={{ ...inputStyle, display: "block", width: "100%", marginTop: 4, fontFamily: "inherit", boxSizing: "border-box", fontSize: "0.9rem" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                    <button style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "none", background: "#1D1D1F", color: "#fff", cursor: "pointer" }}>
+                      บันทึก (และล็อกไม่ให้ระบบเขียนทับ)
+                    </button>
+                    {b?.locked && (
+                      <button name="unlock" value="1" style={{ fontSize: "0.85rem", padding: "0.3rem 0.9rem", borderRadius: 999, border: "1px solid #ccd0d5", background: "#fff", cursor: "pointer" }}>
+                        ปลดล็อก ให้ระบบเรียนรู้ต่อ
+                      </button>
+                    )}
+                  </div>
+                </form>
+              );
+            })}
+          </section>
+
+          <section style={box}>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem" }}>สิ่งที่คุณสอนระบบ</h2>
             <p style={{ margin: "0 0 0.6rem", color: "#9E9E9E", fontSize: "0.85rem" }}>
               เมื่อ AI ไม่แน่ใจ มันจะถามใน LINE — คำตอบของคุณถูกเก็บที่นี่ และใช้ประกอบการวิเคราะห์ทุกภาพต่อจากนี้ ลบได้ถ้าข้อมูลไม่จริงแล้ว
             </p>

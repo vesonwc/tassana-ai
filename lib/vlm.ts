@@ -36,6 +36,10 @@ export interface SnapshotContext {
   nowBangkok?: string; // "HH:mm", injectable for tests
   // Layer 4 (ADR-013): facts humans have taught this site.
   knowledge?: string[];
+  // Layer 5 (ADR-014): the system's own learned sense of "normal" here, plus
+  // recent verdicts humans marked as false alarms.
+  baseline?: string | null;
+  falseAlarmExamples?: string[];
 }
 
 // Layer 1 (ADR-011): universal watch list. Every camera, cannot be disabled.
@@ -98,6 +102,18 @@ export function buildPrompt(ctx: SnapshotContext): string {
     );
   }
 
+  if (ctx.baseline) {
+    lines.push(
+      `สิ่งที่ระบบเรียนรู้เองว่าเป็น "ภาพปกติ" ของกล้องนี้จากการเฝ้าดูที่ผ่านมา: ${ctx.baseline}`,
+      "ใช้ความปกติที่เรียนรู้นี้เพื่อไม่ยกเรื่องธรรมดาซ้ำ ๆ ขึ้นมาเป็นเหตุน่าสงสัย และบรรยายให้กระชับ — แต่กติกาเดิมยังบังคับ: รายการเฝ้าระวังเสมอไม่มีวันถูกความปกติกลบ และสิ่งที่ต่างจากความปกติอย่างชัดเจน (คน/รถ/ของ ที่ไม่เคยมี, เวลาที่ไม่ควรมี) คือสิ่งที่ควรยกขึ้นมา",
+    );
+  }
+  if (ctx.falseAlarmExamples && ctx.falseAlarmExamples.length > 0) {
+    lines.push(
+      `ตัวอย่างการตัดสินของกล้องนี้ที่ผู้ดูแลเคยบอกว่า "แจ้งเท็จ" (อย่าทำซ้ำแบบเดียวกัน): ${ctx.falseAlarmExamples.map((e) => `"${e}"`).join(" / ")}`,
+    );
+  }
+
   const instructions = [ctx.siteInstructions, ctx.cameraInstructions]
     .map((s) => s?.trim())
     .filter((s): s is string => !!s);
@@ -144,6 +160,52 @@ function parseAnalysis(text: string, model: string): VlmAnalysis {
         ? parsed.question_th
         : null,
   };
+}
+
+// ADR-014: distill many "normal" descriptions into one baseline paragraph.
+// Text-only call — cheap, and it runs once a day per camera.
+export async function summarizeBaseline(
+  cameraName: string,
+  profileName: string | null,
+  descriptions: string[],
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new VlmError("GEMINI_API_KEY is not set");
+  const model = process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";
+  const prompt = [
+    `ต่อไปนี้คือคำบรรยายภาพจากกล้อง "${cameraName}"${profileName ? ` (หน้าที่: ${profileName})` : ""} ที่ระบบตัดสินว่า "ปกติ" ในช่วง 7 วันที่ผ่านมา จำนวน ${descriptions.length} รายการ:`,
+    ...descriptions.map((d, i) => `${i + 1}. ${d}`),
+    "",
+    "สรุปเป็นย่อหน้าเดียวภาษาไทย ไม่เกิน 4 ประโยค ว่า \"ภาพปกติของกล้องนี้คืออะไร\": ใครมักปรากฏ (จำนวนคน/ลักษณะ), ทำอะไรบ่อย, มีวัตถุ/รถอะไรประจำ, ช่วงเวลาไหนคึกหรือเงียบ — เขียนแบบเจ้าหน้าที่สรุปให้ รปภ. คนใหม่ฟัง ไม่ต้องขึ้นต้นด้วยคำว่าสรุป ตอบเป็นข้อความธรรมดาเท่านั้น",
+  ].join("\n");
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.2 },
+        }),
+        signal: AbortSignal.timeout(VLM_TIMEOUT_MS),
+      },
+    );
+  } catch (err) {
+    throw new VlmError(`baseline request failed: ${(err as Error).message}`);
+  }
+  if (!response.ok) {
+    if (response.status === 429) throw new VlmRateLimitError("baseline rate limited");
+    throw new VlmError(`baseline HTTP ${response.status}`);
+  }
+  const data = (await response.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new VlmError("baseline: empty response");
+  return text.slice(0, 900);
 }
 
 export async function analyzeSnapshot(

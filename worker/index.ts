@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { v7 as uuidv7 } from "uuid";
 import {
   analyzeSnapshot,
+  summarizeBaseline,
   VlmRateLimitError,
   VlmTimeoutError,
   type SnapshotContext,
@@ -160,10 +161,36 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
     .filter((k) => !k.camera_id || k.camera_id === row.camera_id)
     .map((k) => k.fact_th);
 
+  // Layer 5 (ADR-014): learned baseline + recent human "false alarm" verdicts.
+  let baseline: string | null = null;
+  let falseAlarmExamples: string[] = [];
+  if (row.camera_id) {
+    const { data: bl } = await supabase
+      .from("camera_baselines")
+      .select("baseline_th")
+      .eq("camera_id", row.camera_id)
+      .maybeSingle();
+    baseline = bl?.baseline_th ?? null;
+
+    const { data: fa } = await supabase
+      .from("alerts")
+      .select("events!inner(camera_id, ai)")
+      .eq("feedback", "false_alarm")
+      .eq("events.camera_id", row.camera_id)
+      .order("feedback_at", { ascending: false })
+      .limit(5);
+    falseAlarmExamples = (fa ?? [])
+      .map((r) => (r as unknown as { events: { ai: AiResult | null } }).events?.ai?.description_th)
+      .filter((d): d is string => !!d)
+      .map((d) => d.replace(/(\s*\(สืบเนื่องจากเหตุก่อนหน้า\))+$/g, "").slice(0, 120));
+  }
+
   // Assemble the four config layers (ADR-011/013) from data, not code.
   const rawType = String((row as unknown as { raw?: { eventType?: string } }).raw?.eventType ?? "");
   return analyzeWithFallback(base64, mime, {
     knowledge,
+    baseline,
+    falseAlarmExamples,
     eventType: /patrol/i.test(rawType) ? "night_patrol" : row.event_type,
     cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
     siteName: row.sites?.name ?? "ไม่ระบุไซต์",
@@ -666,6 +693,67 @@ async function sendUncertainQuestion(
   }
 }
 
+// ADR-014: once a day, each active camera distills its recent "normal"
+// verdicts into a baseline paragraph — the system learning the site on its own.
+let lastBaselineDate = "";
+async function maybeLearnBaselines(): Promise<void> {
+  const nowHHmm = bangkokNowHHmm();
+  const today = bangkokDateString(0);
+  if (nowHHmm < "05:00" || nowHHmm > "05:20" || lastBaselineDate === today) return;
+  lastBaselineDate = today;
+  await learnBaselines();
+}
+
+async function learnBaselines(): Promise<void> {
+  const { data: cams } = await supabase
+    .from("cameras")
+    .select("id, name, camera_profiles(name_th)")
+    .eq("enabled", true);
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  for (const cam of cams ?? []) {
+    const { data: locked } = await supabase
+      .from("camera_baselines")
+      .select("locked")
+      .eq("camera_id", cam.id)
+      .maybeSingle();
+    if (locked?.locked) continue; // human-edited — hands off
+
+    const { data: rows } = await supabase
+      .from("events")
+      .select("ai")
+      .eq("camera_id", cam.id)
+      .gte("occurred_at", since)
+      .filter("ai->>verified", "eq", "true")
+      .filter("ai->>severity", "eq", "info")
+      .order("occurred_at", { ascending: false })
+      .limit(150);
+    const descriptions = (rows ?? [])
+      .map((r) => (r.ai as AiResult | null)?.description_th)
+      .filter((d): d is string => !!d)
+      .map((d) => d.replace(/(\s*\(สืบเนื่องจากเหตุก่อนหน้า\))+$/g, ""));
+    // Dedupe inherited copies so the summary is not skewed by repeats.
+    const unique = [...new Set(descriptions)];
+    if (unique.length < 10) continue; // not enough to generalise from
+
+    try {
+      await vlmThrottle();
+      const profileName =
+        (cam as unknown as { camera_profiles: { name_th: string } | null }).camera_profiles?.name_th ?? null;
+      const baseline = await summarizeBaseline(cam.name, profileName, unique.slice(0, 100));
+      await supabase.from("camera_baselines").upsert({
+        camera_id: cam.id,
+        baseline_th: baseline,
+        sample_count: unique.length,
+        locked: false,
+        updated_at: new Date().toISOString(),
+      });
+      console.log(`worker: 🧠 baseline "${cam.name}" (${unique.length} ตัวอย่าง): ${baseline.slice(0, 80)}...`);
+    } catch (err) {
+      console.error(`worker: baseline "${cam.name}" failed:`, (err as Error).message);
+    }
+  }
+}
+
 // ADR-012: dead-man switch — the dashboard warns admins if this pulse stops.
 async function pulseSystemStatus(): Promise<void> {
   const { error } = await supabase.from("system_status").upsert({
@@ -748,6 +836,8 @@ async function main(): Promise<void> {
   setInterval(() => void pulseSystemStatus(), 60_000);
   void maybeSendDailyReports();
   setInterval(() => void maybeSendDailyReports(), 60_000);
+  setInterval(() => void maybeLearnBaselines(), 60_000);
+  if (process.env.LEARN_BASELINES_ON_START === "1") void learnBaselines();
 
   // Push wake (requires the events table in the realtime publication): a new
   // event nudges the worker instantly instead of waiting out the poll cycle.

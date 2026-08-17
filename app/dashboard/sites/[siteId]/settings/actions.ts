@@ -101,6 +101,40 @@ export async function deleteKnowledge(formData: FormData): Promise<void> {
   redirect(`/dashboard/sites/${siteId}/settings?tab=knowledge&saved=1`);
 }
 
+// ADR-014: human edits to the learned baseline lock it (worker won't overwrite);
+// "unlock" hands it back to the daily learner.
+export async function saveBaseline(formData: FormData): Promise<void> {
+  const siteId = String(formData.get("siteId") ?? "");
+  const cameraId = String(formData.get("cameraId") ?? "");
+  const baseline = String(formData.get("baseline") ?? "").trim();
+  const unlock = formData.get("unlock") === "1";
+  if (!siteId || !cameraId) return;
+
+  const session = await getSessionClient();
+  const { data: visible } = await session
+    .from("cameras")
+    .select("id")
+    .eq("id", cameraId)
+    .maybeSingle();
+  if (!visible) return;
+
+  const service = getServiceClient();
+  if (unlock) {
+    await service.from("camera_baselines").update({ locked: false }).eq("camera_id", cameraId);
+  } else if (baseline) {
+    await service.from("camera_baselines").upsert({
+      camera_id: cameraId,
+      baseline_th: baseline.slice(0, 900),
+      locked: true,
+      updated_at: new Date().toISOString(),
+    });
+  } else {
+    await service.from("camera_baselines").delete().eq("camera_id", cameraId);
+  }
+  revalidatePath(`/dashboard/sites/${siteId}/settings`);
+  redirect(`/dashboard/sites/${siteId}/settings?tab=knowledge&saved=1`);
+}
+
 // Per-camera config (ADR-011): role profile, enable switch, and plain-Thai
 // instructions — all data, no deploy.
 export async function saveCameraConfig(formData: FormData): Promise<void> {
