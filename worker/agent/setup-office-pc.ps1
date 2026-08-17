@@ -57,7 +57,17 @@ NVR_PATROL_TIMES=19:30,22:00,00:00,03:00
 NVR_BUSY_START=08:00
 NVR_BUSY_END=19:00
 "@
-[System.IO.File]::WriteAllText("$Dir\.env", $env_, (New-Object System.Text.UTF8Encoding($false)))
+# Merge, never clobber: keep every non-NVR_* line of an existing .env (dev machines hold
+# Supabase/LINE/Gemini keys there) and back the old file up first.
+$envPath = "$Dir\.env"
+if (Test-Path $envPath) {
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  Copy-Item $envPath "$Dir\.env.bak-$stamp"
+  $keep = Get-Content $envPath -Encoding UTF8 | Where-Object { $_ -notmatch '^\s*NVR_' }
+  if ($keep) { $env_ = (($keep -join "`n").TrimEnd()) + "`n`n" + $env_ }
+  Write-Host "   พบ .env เดิม — สำรองไว้ที่ .env.bak-$stamp และคงค่าอื่นที่ไม่ใช่ NVR_* ไว้"
+}
+[System.IO.File]::WriteAllText($envPath, $env_, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "   บันทึก .env แล้ว (อยู่ในเครื่องนี้เท่านั้น)"
 
 Say "5/6 ทดสอบต่อ DVR"
