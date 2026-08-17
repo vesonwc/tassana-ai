@@ -156,7 +156,10 @@ describe("POST /api/webhook/[siteKey]", () => {
     expect(row.source_raw_id).toBe(
       "linedetection:1:2026-08-09T02:14:00+07:00",
     );
-    expect(row.raw).toEqual(GOOD_PAYLOAD);
+    // Device time is far from "now" in this fixture → clock-skew guard fires,
+    // annotating raw; the original payload fields must still be intact.
+    expect(row.raw).toMatchObject(GOOD_PAYLOAD);
+    expect(typeof row.raw._device_clock_skew_sec).toBe("number");
     expect(body.event_id).toBe(row.event_id);
 
     expect(state.rpcCalls).toEqual([

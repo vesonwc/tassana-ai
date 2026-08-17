@@ -66,11 +66,21 @@ export function extractHikvisionCameraRef(
   return asString(payload.channelID) ?? asString(payload.dynChannelID);
 }
 
+// Device clocks drift — badly, and at every real site. If the NVR's timestamp
+// disagrees with our receive time by more than this, trust our clock for
+// ordering/display and keep the device value in raw for forensics.
+const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+
 function parseOccurredAt(payload: Record<string, unknown>, fallback: string): string {
   const raw = asString(payload.dateTime);
   if (raw) {
     const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) return raw;
+    if (!Number.isNaN(parsed.getTime())) {
+      const skew = Math.abs(parsed.getTime() - new Date(fallback).getTime());
+      if (skew <= MAX_CLOCK_SKEW_MS) return raw;
+      payload._device_clock_skew_sec = Math.round((parsed.getTime() - new Date(fallback).getTime()) / 1000);
+      return fallback;
+    }
   }
   // Malformed/missing device time — fail open with our receive time.
   return fallback;
