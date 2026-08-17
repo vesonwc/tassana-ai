@@ -30,7 +30,11 @@ const COOLDOWN_QUIET_MS = Number(process.env.NVR_COOLDOWN_QUIET_MS ?? 30_000);
 const BUSY_START = process.env.NVR_BUSY_START ?? "08:00";
 const BUSY_END = process.env.NVR_BUSY_END ?? "19:00";
 // Frames that barely changed since the last one we sent are not worth a call.
-const MIN_FRAME_DIFF_PCT = Number(process.env.NVR_MIN_FRAME_DIFF ?? 4);
+// The histogram test is coarse — an office scene keeps near-identical colour
+// stats while people move — so the bar is set low, and a forced refresh
+// guarantees the cloud still sees every channel at least periodically.
+const MIN_FRAME_DIFF_PCT = Number(process.env.NVR_MIN_FRAME_DIFF ?? 1.5);
+const FORCE_SEND_EVERY_MS = Number(process.env.NVR_FORCE_SEND_MS ?? 10 * 60_000);
 
 function bangkokHHmm(): string {
   return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
@@ -160,8 +164,10 @@ function fetchBuffer(path: string): Promise<{ status: number; body: Buffer; type
 // ---------------------------------------------------------------- forwarding
 const lastSeen = new Map<string, number>();
 const lastFrame = new Map<string, Buffer>();
+const lastSent = new Map<string, number>();
 let skippedCooldown = 0;
 let skippedSimilar = 0;
+let sentCount = 0;
 
 function xmlField(xml: string, tag: string): string {
   return xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, "i"))?.[1]?.trim() ?? "";
@@ -196,10 +202,13 @@ async function forwardEvent(xml: string): Promise<void> {
     console.warn(`nvr-listener: snapshot ch${channel} failed:`, (err as Error).message);
   }
 
-  // Same scene as last time we sent for this channel? Not worth an AI call.
+  // Same scene as last time we sent for this channel? Not worth an AI call —
+  // unless it has been a while, in which case send anyway so the channel never
+  // goes silent on the dashboard just because the room looks the same.
   if (image && !serious) {
     const prev = lastFrame.get(channel);
-    if (prev && frameDiffPct(prev, image) < MIN_FRAME_DIFF_PCT) {
+    const staleForMs = now - (lastSent.get(channel) ?? 0);
+    if (prev && staleForMs < FORCE_SEND_EVERY_MS && frameDiffPct(prev, image) < MIN_FRAME_DIFF_PCT) {
       skippedSimilar += 1;
       lastSeen.set(key, now); // still counts as "seen" so we don't spin
       return;
@@ -207,6 +216,8 @@ async function forwardEvent(xml: string): Promise<void> {
     lastFrame.set(channel, image);
   }
   lastSeen.set(key, now);
+  lastSent.set(channel, now);
+  sentCount += 1;
 
   const form = new FormData();
   form.append("event", new Blob([xml], { type: "application/xml" }), "event.xml");
@@ -364,7 +375,7 @@ async function main(): Promise<void> {
   }
   setInterval(() => {
     console.log(
-      `nvr-listener: alive — ${isBusyHours() ? "เวลางาน (cooldown 3 นาที/ช่อง)" : "นอกเวลางาน (cooldown 30 วิ)"} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
+      `nvr-listener: alive — ${isBusyHours() ? "เวลางาน (cooldown 3 นาที/ช่อง)" : "นอกเวลางาน (cooldown 30 วิ)"} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
     );
   }, HEARTBEAT_EVERY_MS);
 }
