@@ -42,11 +42,18 @@ function get(path: string): Promise<{ status: number; body: string }> {
 
 const field = (xml: string, tag: string) => xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, "i"))?.[1]?.trim() ?? "";
 
+// Exit codes (used by setup-office-pc.ps1, which must not depend on parsing Thai text):
+//   0 = reached NVR and credentials accepted on at least one channel
+//   2 = NVR reachable but credentials rejected (401)
+//   3 = NVR unreachable / no ISAPI answer
 async function main(): Promise<void> {
   console.log(`ตรวจ NVR ${HOST} — สถานะตรวจจับความเคลื่อนไหวรายช่อง:`);
   console.log("ช่อง | motion | ยิงแจ้งเตือน (notify center) | หมายเหตุ");
+  let ok = 0, unauthorized = 0;
   for (let ch = 1; ch <= 16; ch++) {
     const md = await get(`/ISAPI/System/Video/inputs/channels/${ch}/motionDetection`).catch(() => ({ status: 0, body: "" }));
+    if (md.status === 401) unauthorized++;
+    if (md.status === 200) ok++;
     if (md.status !== 200) { console.log(`${String(ch).padStart(4)} | -      | -    | ISAPI ตอบ ${md.status || "ไม่ตอบ"}`); continue; }
     const enabled = field(md.body, "enabled");
     const trig = await get(`/ISAPI/Event/triggers/VMD-${ch}`).catch(() => ({ status: 0, body: "" }));
@@ -54,5 +61,8 @@ async function main(): Promise<void> {
     console.log(`${String(ch).padStart(4)} | ${enabled === "true" ? "เปิด ✅" : "ปิด ❌"} | ${notifyCenter.padEnd(11)} |`);
   }
   console.log("\nสรุป: motion 'ปิด' = กล้องช่องนั้นไม่ตรวจจับอะไรเลย ต้องเปิดก่อนถึงจะมี event");
+  if (ok > 0) process.exitCode = 0;
+  else if (unauthorized > 0) { console.log("❌ DVR ปฏิเสธรหัสผ่าน (401)"); process.exitCode = 2; }
+  else { console.log(`❌ ต่อ DVR ที่ ${HOST}:${PORT} ไม่ได้`); process.exitCode = 3; }
 }
 void main();

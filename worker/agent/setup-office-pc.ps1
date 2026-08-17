@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 # Fresh Windows PCs ship with ExecutionPolicy=Restricted, which blocks npm.ps1/npx.ps1.
 # Allow scripts for this process only (no permanent change), and call the .cmd shims explicitly.
 try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding } catch {}
 $Repo = "https://github.com/vesonwc/tassana-ai.git"
 $Dir  = "C:\Tassana ai"
 
@@ -60,9 +61,17 @@ NVR_BUSY_END=19:00
 Write-Host "   บันทึก .env แล้ว (อยู่ในเครื่องนี้เท่านั้น)"
 
 Say "5/6 ทดสอบต่อ DVR"
-$test = Start-Process -FilePath "npx.cmd" -ArgumentList "tsx","worker/tools/nvr-probe.ts" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\tassana-probe.txt"
-$out = Get-Content "$env:TEMP\tassana-probe.txt" -Raw
-if ($out -match "เปิด") { Write-Host "   ✅ ต่อ DVR ได้ รหัสถูกต้อง" -ForegroundColor Green } else { Write-Host "   ⚠️ ต่อ DVR ไม่ได้ — เช็ก IP/รหัส แล้วรันสคริปต์ใหม่" -ForegroundColor Yellow; Write-Host $out; exit 1 }
+# Decide by exit code, not by matching Thai text (Windows PowerShell reads redirected files as ANSI).
+& npx.cmd tsx worker/tools/nvr-probe.ts
+$probe = $LASTEXITCODE
+if ($probe -eq 0) {
+  Write-Host "   ✅ ต่อ DVR ได้ รหัสถูกต้อง" -ForegroundColor Green
+} else {
+  if ($probe -eq 2) { Write-Host "   ⚠️ DVR ปฏิเสธรหัสผ่าน — รันสคริปต์ใหม่แล้วพิมพ์รหัสอีกครั้ง" -ForegroundColor Yellow }
+  else { Write-Host "   ⚠️ ต่อ DVR ไม่ได้ — เช็กว่า IP ถูก และเครื่องนี้อยู่วง LAN เดียวกับ DVR แล้วรันสคริปต์ใหม่" -ForegroundColor Yellow }
+  Write-Host "   (ยังไม่ได้ตั้ง autostart — หน้าต่างนี้ยังเปิดอยู่ ดูข้อความด้านบนได้)" -ForegroundColor Yellow
+  return   # do NOT 'exit' — under 'irm | iex' that would close the whole PowerShell window
+}
 
 Say "6/6 ตั้งให้สตาร์ทเองตอนเปิดเครื่อง"
 powershell -ExecutionPolicy Bypass -File "$Dir\worker\agent\install-autostart.ps1"
