@@ -185,6 +185,12 @@ async function forwardEvent(xml: string): Promise<void> {
   const key = `${eventType}:${channel}`;
   const now = Date.now();
   PULSE_CHANNELS.add(Number(channel));
+  // Hard floor regardless of mode: the DVR re-fires the same alarm several
+  // times a second while motion continues; never forward faster than this.
+  if (now - (lastSent.get(channel) ?? 0) < 20_000) {
+    skippedCooldown += 1;
+    return;
+  }
   // Serious events (line crossing / intrusion) always get through fast.
   const serious = /linedetection|fielddetection|intrusion/i.test(eventType);
   const cooldown = serious ? COOLDOWN_QUIET_MS : isBusyHours() ? COOLDOWN_BUSY_MS : COOLDOWN_QUIET_MS;

@@ -200,7 +200,9 @@ export default async function SiteEventsPage({
                   )}
                 </div>
                 {ev.ai?.description_th && (
-                  <div style={{ marginTop: 4, color: "#1D1D1F" }}>🤖 {ev.ai.description_th}</div>
+                  <div style={{ marginTop: 4, color: "#1D1D1F" }}>
+                    🤖 {ev.ai.description_th.replace(/(\s*\(สืบเนื่องจากเหตุก่อนหน้า\))+$/g, "")}
+                  </div>
                 )}
                 {!ev.ai?.description_th && !ev.ai?.processed_at && ev.media?.snapshot_path && (
                   <div style={{ marginTop: 4, color: "#9E9E9E", fontSize: "0.85rem" }}>

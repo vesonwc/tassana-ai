@@ -222,12 +222,15 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
       .order("occurred_at", { ascending: false })
       .limit(1);
     const prior = recent?.[0]?.ai as AiResult | undefined;
-    if (prior && prior.verified === true && prior.severity === "info" && prior.description_th) {
+    // Only inherit from a *fresh* verdict, never from an inherited one — and
+    // keep the wording clean (no stacking suffixes).
+    const priorIsFresh = !!prior?.model && !prior.model.endsWith("+inherit");
+    if (prior && priorIsFresh && prior.verified === true && prior.severity === "info" && prior.description_th) {
       await updateAi(eventId, {
         verified: true,
         severity: "info",
-        description_th: `${prior.description_th} (สืบเนื่องจากเหตุก่อนหน้า)`,
-        model: `${prior.model ?? "?"}+inherit`,
+        description_th: prior.description_th,
+        model: `${prior.model}+inherit`,
         processed_at: new Date().toISOString(),
       });
       await ack(msg.msg_id);
