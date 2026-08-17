@@ -58,9 +58,12 @@ export function isWithinStrictHours(
 }
 
 export function buildPrompt(ctx: SnapshotContext): string {
+  const isPatrol = /patrol/i.test(ctx.eventType) || ctx.eventType === "night_patrol";
   const lines = [
     "คุณเป็นผู้ช่วยเจ้าหน้าที่รักษาความปลอดภัยหมู่บ้าน/คอนโดในประเทศไทย",
-    `ภาพนี้มาจากกล้อง "${ctx.cameraName}" ของ "${ctx.siteName}" ระบบตรวจจับแจ้งประเภทเหตุการณ์เบื้องต้นว่า "${ctx.eventType}"`,
+    isPatrol
+      ? `ภาพนี้คือ "การเดินตรวจเวร" ตามเวลาจากกล้อง "${ctx.cameraName}" ของ "${ctx.siteName}" — ไม่ได้เกิดจากความเคลื่อนไหว ให้ประเมิน "สภาพ" ของพื้นที่: มีคนค้างอยู่ไหม ไฟ/แอร์/จอเปิดทิ้งไว้ไหม ประตูหน้าต่างปิดเรียบร้อยไหม มีอะไรผิดที่ผิดทางไหม ถ้าเรียบร้อยทุกอย่างให้ verified=true severity=info และบอกว่า "ปิดเรียบร้อย"`
+      : `ภาพนี้มาจากกล้อง "${ctx.cameraName}" ของ "${ctx.siteName}" ระบบตรวจจับแจ้งประเภทเหตุการณ์เบื้องต้นว่า "${ctx.eventType}"`,
     `สิ่งที่ต้องเฝ้าระวังเสมอไม่ว่ากล้องทำหน้าที่อะไร (พบเมื่อไหร่ให้ verified=true และ severity อย่างน้อย warning): ${BASE_WATCH_TH}`,
   ];
 

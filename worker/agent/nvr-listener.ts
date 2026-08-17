@@ -223,6 +223,47 @@ async function forwardEvent(xml: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------- night patrol
+// "Lights left on" produces no motion, so the NVR never fires. Like a guard's
+// walk-round, we snapshot every patrol channel on a schedule and let the VLM
+// judge the *state* of the room (lights, doors, stragglers).
+const PATROL_CHANNELS = (process.env.NVR_PATROL_CHANNELS ?? "")
+  .split(",").map((s) => Number(s.trim())).filter((n) => n >= 1);
+const PATROL_TIMES = (process.env.NVR_PATROL_TIMES ?? "19:30,22:00,00:00,03:00")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+let lastPatrolKey = "";
+
+async function runPatrol(label: string): Promise<void> {
+  console.log(`nvr-listener: 🔦 ตรวจเวร ${label} — ${PATROL_CHANNELS.length} กล้อง`);
+  for (const ch of PATROL_CHANNELS) {
+    try {
+      const pic = await fetchBuffer(`/ISAPI/Streaming/channels/${ch}01/picture`);
+      if (pic.status !== 200 || pic.body.length < 1000) continue;
+      const form = new FormData();
+      const xml = `<EventNotificationAlert><eventType>patrol</eventType><eventState>active</eventState><channelID>${ch}</channelID><dateTime>${new Date().toISOString()}</dateTime><eventDescription>night patrol ${label}</eventDescription></EventNotificationAlert>`;
+      form.append("event", new Blob([xml], { type: "application/xml" }), "event.xml");
+      form.append("image", new Blob([new Uint8Array(pic.body)], { type: "image/jpeg" }), "snapshot.jpg");
+      const res = await fetch(WEBHOOK, { method: "POST", body: form });
+      console.log(`nvr-listener: 🔦 ch${ch} → cloud ${res.status}`);
+    } catch (err) {
+      console.warn(`nvr-listener: patrol ch${ch} failed:`, (err as Error).message);
+    }
+  }
+}
+
+function patrolTick(): void {
+  if (PATROL_CHANNELS.length === 0) return;
+  const now = bangkokHHmm();
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  for (const t of PATROL_TIMES) {
+    const key = `${today} ${t}`;
+    if (now === t && lastPatrolKey !== key) {
+      lastPatrolKey = key;
+      void runPatrol(t);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- stream
 function subscribe(): void {
   console.log(`nvr-listener: เชื่อมต่อ ${HOST}:${PORT} ...`);
@@ -288,6 +329,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   subscribe();
+  if (PATROL_CHANNELS.length > 0) {
+    console.log(`nvr-listener: ตรวจเวรดึกเปิดใช้ — กล้อง ${PATROL_CHANNELS.join(",")} เวลา ${PATROL_TIMES.join(", ")}`);
+    setInterval(patrolTick, 30_000);
+  }
   setInterval(() => {
     console.log(
       `nvr-listener: alive — ${isBusyHours() ? "เวลางาน (cooldown 3 นาที/ช่อง)" : "นอกเวลางาน (cooldown 30 วิ)"} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,

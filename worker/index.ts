@@ -161,9 +161,10 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
     .map((k) => k.fact_th);
 
   // Assemble the four config layers (ADR-011/013) from data, not code.
+  const rawType = String((row as unknown as { raw?: { eventType?: string } }).raw?.eventType ?? "");
   return analyzeWithFallback(base64, mime, {
     knowledge,
-    eventType: row.event_type,
+    eventType: /patrol/i.test(rawType) ? "night_patrol" : row.event_type,
     cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
     siteName: row.sites?.name ?? "ไม่ระบุไซต์",
     profileName: row.cameras?.camera_profiles?.name_th ?? null,
@@ -186,7 +187,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "event_id, site_id, camera_id, event_type, occurred_at, media, ai, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, line_group_id, custom_instructions_th, rules)",
+      "event_id, site_id, camera_id, event_type, occurred_at, media, ai, raw, cameras(name, enabled, custom_instructions_th, camera_profiles(name_th, vlm_prompt_th)), sites(name, line_group_id, custom_instructions_th, rules)",
     )
     .eq("event_id", eventId)
     .maybeSingle();
@@ -207,7 +208,8 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   // for the same event type, inherit that verdict instead of paying for a
   // fresh look. Serious types always get analyzed.
   const SERIOUS = new Set(["intrusion", "line_crossing", "loitering", "camera_offline"]);
-  if (row.camera_id && !SERIOUS.has(row.event_type)) {
+  const isPatrol = /patrol/i.test(String((row as unknown as { raw?: { eventType?: string } }).raw?.eventType ?? ""));
+  if (row.camera_id && !SERIOUS.has(row.event_type) && !isPatrol) {
     const since = new Date(Date.now() - 10 * 60_000).toISOString();
     const { data: recent } = await supabase
       .from("events")

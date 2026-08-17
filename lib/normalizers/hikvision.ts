@@ -11,6 +11,10 @@ const HIKVISION_EVENT_MAP: Record<string, EventType> = {
   vehicledetection: "lpr",
   anpr: "lpr",
   videoloss: "camera_offline",
+  // Our own scheduled walk-round snapshot (see nvr-listener night patrol) —
+  // rides the same pipe as a plain detection so nothing special is needed.
+  patrol: "person_detected",
+  vmd: "person_detected",
 };
 
 export interface NormalizeContext {
