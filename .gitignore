@@ -35,3 +35,5 @@ testdata/
 # site photos / personal reference images (PDPA - never in repo)
 ข้อมูลกล้อง/
 nvr-snapshots/
+
+logs/
