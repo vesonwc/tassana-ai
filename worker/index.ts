@@ -837,7 +837,13 @@ async function main(): Promise<void> {
   void maybeSendDailyReports();
   setInterval(() => void maybeSendDailyReports(), 60_000);
   setInterval(() => void maybeLearnBaselines(), 60_000);
-  if (process.env.LEARN_BASELINES_ON_START === "1") void learnBaselines();
+  if (process.env.LEARN_BASELINES_ON_START === "1") {
+    await learnBaselines();
+    if (process.env.LEARN_ONLY === "1") {
+      console.log("worker: learn-only run finished");
+      process.exit(0);
+    }
+  }
 
   // Push wake (requires the events table in the realtime publication): a new
   // event nudges the worker instantly instead of waiting out the poll cycle.
