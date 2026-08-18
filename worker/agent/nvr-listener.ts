@@ -1,5 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
+import { sceneChanged } from "../../lib/scene-change";
+import { detectObjects, detectorReady, loadDetectorNow } from "../detector";
+import { summarizeLabels, type ObjectDetection } from "../../lib/detector-core";
 
 // On-site NVR listener (M6, mode A without touching NVR menus).
 // Logs into a Hikvision/HiLook NVR over the LAN with HTTP Digest auth,
@@ -38,6 +41,9 @@ const BUSY_END = process.env.NVR_BUSY_END ?? "19:00";
 // guarantees the cloud still sees every channel at least periodically.
 const MIN_FRAME_DIFF_PCT = Number(process.env.NVR_MIN_FRAME_DIFF ?? 1.5);
 const FORCE_SEND_EVERY_MS = Number(process.env.NVR_FORCE_SEND_MS ?? 10 * 60_000);
+// ADR-017: run the object detector here instead of trusting a blind cooldown.
+// Off by default so a bridge PC that has not been updated behaves as before.
+const YOLO_ON = process.env.NVR_YOLO === "1";
 
 function bangkokHHmm(): string {
   return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
@@ -168,6 +174,8 @@ function fetchBuffer(path: string): Promise<{ status: number; body: Buffer; type
 const lastSeen = new Map<string, number>();
 const lastFrame = new Map<string, Buffer>();
 const lastSent = new Map<string, number>();
+// Last detector reading actually forwarded, per channel (ADR-017).
+const lastDetections = new Map<string, ObjectDetection[]>();
 let skippedCooldown = 0;
 let skippedSimilar = 0;
 let sentCount = 0;
@@ -196,10 +204,16 @@ async function forwardEvent(xml: string): Promise<void> {
   }
   // Serious events (line crossing / intrusion) always get through fast.
   const serious = /linedetection|fielddetection|intrusion/i.test(eventType);
-  const cooldown = serious ? COOLDOWN_QUIET_MS : isBusyHours() ? COOLDOWN_BUSY_MS : COOLDOWN_QUIET_MS;
-  if (now - (lastSeen.get(key) ?? 0) < cooldown) {
-    skippedCooldown += 1;
-    return;
+  // ADR-017: with the local detector running, the blind time cooldown is
+  // replaced by "did the picture actually change?". Without it (or if it failed
+  // to load) we keep the old time-based behaviour exactly as before.
+  const useDetector = YOLO_ON && detectorReady();
+  if (!useDetector) {
+    const cooldown = serious ? COOLDOWN_QUIET_MS : isBusyHours() ? COOLDOWN_BUSY_MS : COOLDOWN_QUIET_MS;
+    if (now - (lastSeen.get(key) ?? 0) < cooldown) {
+      skippedCooldown += 1;
+      return;
+    }
   }
 
   // Grab a fresh frame from that channel's main stream.
@@ -214,16 +228,36 @@ async function forwardEvent(xml: string): Promise<void> {
   // Same scene as last time we sent for this channel? Not worth an AI call —
   // unless it has been a while, in which case send anyway so the channel never
   // goes silent on the dashboard just because the room looks the same.
-  if (image && !serious) {
-    const prev = lastFrame.get(channel);
-    const staleForMs = now - (lastSent.get(channel) ?? 0);
-    if (prev && staleForMs < FORCE_SEND_EVERY_MS && frameDiffPct(prev, image) < MIN_FRAME_DIFF_PCT) {
-      skippedSimilar += 1;
-      lastSeen.set(key, now); // still counts as "seen" so we don't spin
-      return;
+  const staleForMs = now - (lastSent.get(channel) ?? 0);
+  const mustRefresh = staleForMs >= FORCE_SEND_EVERY_MS;
+  if (image && !serious && !mustRefresh) {
+    if (useDetector) {
+      // ADR-017: content decides, not the clock.
+      const run = await detectObjects(image);
+      if (run) {
+        const prev = lastDetections.get(channel) ?? null;
+        const verdict = sceneChanged(prev, run.detections);
+        if (!verdict.changed) {
+          skippedSimilar += 1;
+          lastSeen.set(key, now);
+          return;
+        }
+        console.log(
+          `nvr-listener: ch${channel} เปลี่ยน (${verdict.reason}) — ${summarizeLabels(run.detections)} [${run.ms}ms]`,
+        );
+        lastDetections.set(channel, run.detections);
+      }
+      // run === null → detector unavailable this time: fall through and send.
+    } else {
+      const prev = lastFrame.get(channel);
+      if (prev && frameDiffPct(prev, image) < MIN_FRAME_DIFF_PCT) {
+        skippedSimilar += 1;
+        lastSeen.set(key, now); // still counts as "seen" so we don't spin
+        return;
+      }
     }
-    lastFrame.set(channel, image);
   }
+  if (image) lastFrame.set(channel, image);
   lastSeen.set(key, now);
   lastSent.set(channel, now);
   sentCount += 1;
@@ -357,6 +391,18 @@ function subscribe(): void {
 }
 
 async function main(): Promise<void> {
+  // ADR-017: load the detector before streaming so the very first events are
+  // already judged by content. Failure is not fatal — we fall back to cooldown.
+  if (YOLO_ON) {
+    console.log("nvr-listener: กำลังโหลดตัวตรวจจับ (YOLO) …");
+    const ok = await loadDetectorNow();
+    console.log(
+      ok
+        ? "nvr-listener: ตัวตรวจจับพร้อม — ใช้ \"ภาพเปลี่ยนจริงไหม\" แทน cooldown ตามเวลา"
+        : "nvr-listener: ตัวตรวจจับใช้ไม่ได้ — กลับไปใช้ cooldown ตามเวลาเหมือนเดิม",
+    );
+  }
+
   // Sanity check: device info proves host + credentials before we stream.
   try {
     const info = await fetchBuffer("/ISAPI/System/deviceInfo");
@@ -384,7 +430,7 @@ async function main(): Promise<void> {
   }
   setInterval(() => {
     console.log(
-      `nvr-listener: alive — ${isBusyHours() ? `เวลางาน (cooldown ${Math.round(COOLDOWN_BUSY_MS / 60_000)} นาที/ช่อง)` : `นอกเวลางาน (cooldown ${Math.round(COOLDOWN_QUIET_MS / 1000)} วิ)`} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
+      `nvr-listener: alive — ${YOLO_ON && detectorReady() ? "โหมดตรวจจับภาพ (ไม่ใช้ cooldown)" : isBusyHours() ? `เวลางาน (cooldown ${Math.round(COOLDOWN_BUSY_MS / 60_000)} นาที/ช่อง)` : `นอกเวลางาน (cooldown ${Math.round(COOLDOWN_QUIET_MS / 1000)} วิ)`} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
     );
   }, HEARTBEAT_EVERY_MS);
 }
