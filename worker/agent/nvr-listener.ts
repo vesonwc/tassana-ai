@@ -25,7 +25,10 @@ const WEBHOOK = process.env.NVR_WEBHOOK_URL ?? "";
 const HEARTBEAT_EVERY_MS = 5 * 60_000;
 // Per-channel cooldown. Busy office hours: motion fires nonstop while people
 // simply work — one look every few minutes is plenty. Off-hours: react fast.
-const COOLDOWN_BUSY_MS = Number(process.env.NVR_COOLDOWN_BUSY_MS ?? 3 * 60_000);
+// 15 min busy default (was 3): measured 2026-08-18 on the HQ site, 3 cameras at
+// 3 min burned the Gemini free tier (500/day) by 09:00; 15 min keeps a 24h site
+// around ~300 VLM calls/day. Serious events (intrusion etc.) bypass cooldown.
+const COOLDOWN_BUSY_MS = Number(process.env.NVR_COOLDOWN_BUSY_MS ?? 15 * 60_000);
 const COOLDOWN_QUIET_MS = Number(process.env.NVR_COOLDOWN_QUIET_MS ?? 30_000);
 const BUSY_START = process.env.NVR_BUSY_START ?? "08:00";
 const BUSY_END = process.env.NVR_BUSY_END ?? "19:00";
@@ -381,7 +384,7 @@ async function main(): Promise<void> {
   }
   setInterval(() => {
     console.log(
-      `nvr-listener: alive — ${isBusyHours() ? "เวลางาน (cooldown 3 นาที/ช่อง)" : "นอกเวลางาน (cooldown 30 วิ)"} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
+      `nvr-listener: alive — ${isBusyHours() ? `เวลางาน (cooldown ${Math.round(COOLDOWN_BUSY_MS / 60_000)} นาที/ช่อง)` : `นอกเวลางาน (cooldown ${Math.round(COOLDOWN_QUIET_MS / 1000)} วิ)`} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
     );
   }, HEARTBEAT_EVERY_MS);
 }
