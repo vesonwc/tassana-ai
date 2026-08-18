@@ -42,3 +42,6 @@ logs/
 worker/agent/run-nvr-listener.cmd
 worker/agent/run-nvr-listener-hidden.vbs
 logs/
+
+# ONNX detector weights — downloaded at runtime (ADR-015)
+models/

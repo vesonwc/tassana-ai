@@ -37,12 +37,23 @@ export interface Media {
   clip_status: ClipStatus;
 }
 
+// ADR-015: what the on-worker object detector saw before the VLM ran.
+export interface DetectorSummary {
+  model: string; // e.g. "yolox_s"
+  mode: "shadow" | "gate";
+  ms: number;
+  objects: { label: string; confidence: number; bbox: [number, number, number, number] }[]; // bbox normalized 0-1
+  gate: "analyze" | "skip" | "would-skip"; // would-skip = shadow mode verdict
+  reason: string;
+}
+
 export interface AiResult {
   verified: boolean | null;
   severity: Severity | null;
   description_th: string | null;
   model: string | null;
   processed_at: string | null;
+  detector?: DetectorSummary | null;
 }
 
 export interface NormalizedEvent {

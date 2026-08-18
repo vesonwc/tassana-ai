@@ -7,8 +7,11 @@ import {
   VlmTimeoutError,
   type SnapshotContext,
   type VlmAnalysis,
+  type VlmAttachment,
 } from "../lib/vlm";
-import type { AiResult, EventType, Severity } from "../lib/types";
+import type { AiResult, DetectorSummary, EventType, Severity } from "../lib/types";
+import { buildDetectorHint, decideGate, normalizeBox, summarizeLabels } from "../lib/detector-core";
+import { cropForVlm, detectObjects, detectorDisabledReason, DETECTOR_MODE, getDetector } from "./detector";
 import { buildAlertFlex, buildDailyReportText, pushLineMessage } from "../lib/line";
 import { TYPE_TH } from "../lib/labels";
 
@@ -32,6 +35,8 @@ const VLM_MIN_INTERVAL_MS = Number(process.env.VLM_MIN_INTERVAL_MS ?? 7_000);
 const VLM_FALLBACK_MODEL =
   process.env.GEMINI_FALLBACK_MODEL ?? "gemini-flash-latest";
 const HEARTBEAT_CHECK_MS = 60_000;
+// ADR-015: model tag for events settled by the detector gate (no VLM call).
+const DETECTOR_GATE_MODEL = "detector-gate";
 const HEARTBEAT_TIMEOUT_MIN = Number(process.env.HEARTBEAT_TIMEOUT_MIN ?? 10);
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -123,23 +128,85 @@ async function analyzeWithFallback(
   base64: string,
   mime: string,
   ctx: SnapshotContext,
+  attachments: VlmAttachment[] = [],
 ): Promise<VlmAnalysis> {
   await vlmThrottle();
   try {
-    return await analyzeSnapshot(base64, mime, ctx);
+    return await analyzeSnapshot(base64, mime, ctx, undefined, attachments);
   } catch (err) {
     if (!(err instanceof VlmRateLimitError)) throw err;
     console.warn(`worker: primary model rate-limited, trying ${VLM_FALLBACK_MODEL}`);
     await vlmThrottle();
-    return analyzeSnapshot(base64, mime, ctx, VLM_FALLBACK_MODEL);
+    return analyzeSnapshot(base64, mime, ctx, VLM_FALLBACK_MODEL, attachments);
   }
 }
 
-async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
+// ADR-015: run the object detector first. Never throws — a broken detector
+// simply yields { detector: null } and the VLM sees the plain frame.
+async function runDetectorStage(
+  row: EventRow,
+  buffer: Buffer,
+  rawType: string,
+): Promise<{
+  detector: DetectorSummary | null;
+  skip: boolean;
+  hint: string | null;
+  attachments: VlmAttachment[];
+}> {
+  const none = { detector: null, skip: false, hint: null, attachments: [] };
+  if (DETECTOR_MODE === "off") return none;
+  let run: Awaited<ReturnType<typeof detectObjects>> = null;
+  try {
+    run = await detectObjects(buffer);
+  } catch (err) {
+    console.warn(`worker: detector threw — fail open: ${(err as Error).message}`);
+  }
+  if (!run) {
+    console.warn(`worker: detector unavailable (${detectorDisabledReason() ?? "timeout"}) — fail open`);
+    return none;
+  }
+  const gate = decideGate({
+    mode: DETECTOR_MODE,
+    eventType: row.event_type,
+    rawEventType: rawType,
+    detections: run.detections,
+  });
+  const detector: DetectorSummary = {
+    model: run.model,
+    mode: DETECTOR_MODE,
+    ms: run.ms,
+    objects: run.detections.slice(0, 10).map((d) => ({
+      label: d.label,
+      confidence: Math.round(d.confidence * 100) / 100,
+      bbox: normalizeBox(d.box, run!.width, run!.height),
+    })),
+    gate: gate.action === "skip" ? "skip" : gate.wouldSkip ? "would-skip" : "analyze",
+    reason: gate.reason,
+  };
+  console.log(
+    `worker: detector ${row.event_id} ${summarizeLabels(run.detections)} ${run.ms}ms → ${detector.gate}`,
+  );
+  if (gate.action === "skip") return { detector, skip: true, hint: null, attachments: [] };
+
+  const attachments: VlmAttachment[] = [];
+  if (gate.relevant.length > 0) {
+    const crop = await cropForVlm(buffer, run);
+    if (crop) attachments.push({ base64: crop.base64, mimeType: crop.mimeType });
+  }
+  return { detector, skip: false, hint: buildDetectorHint(run.detections), attachments };
+}
+
+interface AnalyzeOutcome {
+  analysis: VlmAnalysis | null;
+  detector: DetectorSummary | null;
+  gateSkipped: boolean;
+}
+
+async function analyzeEvent(row: EventRow): Promise<AnalyzeOutcome> {
   const snapshotPath = row.media?.snapshot_path;
   if (!snapshotPath) {
     console.log(`worker: ${row.event_id} has no snapshot, skipping analysis`);
-    return null;
+    return { analysis: null, detector: null, gateSkipped: false };
   }
   const { data: blob, error } = await supabase.storage
     .from("snapshots")
@@ -147,8 +214,13 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
   if (error || !blob) {
     throw new Error(`snapshot download failed: ${error?.message}`);
   }
-  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
+  const buffer = Buffer.from(await blob.arrayBuffer());
+  const base64 = buffer.toString("base64");
   const mime = blob.type || "image/jpeg";
+
+  const rawType = String((row as unknown as { raw?: { eventType?: string } }).raw?.eventType ?? "");
+  const stage = await runDetectorStage(row, buffer, rawType);
+  if (stage.skip) return { analysis: null, detector: stage.detector, gateSkipped: true };
 
   // Layer 4 (ADR-013): everything humans have taught this site.
   const { data: knowledgeRows } = await supabase
@@ -185,22 +257,28 @@ async function analyzeEvent(row: EventRow): Promise<VlmAnalysis | null> {
       .map((d) => d.replace(/(\s*\(สืบเนื่องจากเหตุก่อนหน้า\))+$/g, "").slice(0, 120));
   }
 
-  // Assemble the four config layers (ADR-011/013) from data, not code.
-  const rawType = String((row as unknown as { raw?: { eventType?: string } }).raw?.eventType ?? "");
-  return analyzeWithFallback(base64, mime, {
-    knowledge,
-    baseline,
-    falseAlarmExamples,
-    eventType: /patrol/i.test(rawType) ? "night_patrol" : row.event_type,
-    cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
-    siteName: row.sites?.name ?? "ไม่ระบุไซต์",
-    profileName: row.cameras?.camera_profiles?.name_th ?? null,
-    profilePrompt: row.cameras?.camera_profiles?.vlm_prompt_th ?? null,
-    siteInstructions: row.sites?.custom_instructions_th ?? null,
-    cameraInstructions: row.cameras?.custom_instructions_th ?? null,
-    strictHours: row.sites?.rules?.strict_hours ?? null,
-    nowBangkok: bangkokNowHHmm(),
-  });
+  // Assemble the config layers (ADR-011/013/014/015) from data, not code.
+  const analysis = await analyzeWithFallback(
+    base64,
+    mime,
+    {
+      knowledge,
+      baseline,
+      falseAlarmExamples,
+      detectorHint: stage.hint,
+      eventType: /patrol/i.test(rawType) ? "night_patrol" : row.event_type,
+      cameraName: row.cameras?.name ?? "ไม่ระบุกล้อง",
+      siteName: row.sites?.name ?? "ไม่ระบุไซต์",
+      profileName: row.cameras?.camera_profiles?.name_th ?? null,
+      profilePrompt: row.cameras?.camera_profiles?.vlm_prompt_th ?? null,
+      siteInstructions: row.sites?.custom_instructions_th ?? null,
+      cameraInstructions: row.cameras?.custom_instructions_th ?? null,
+      strictHours: row.sites?.rules?.strict_hours ?? null,
+      nowBangkok: bangkokNowHHmm(),
+    },
+    stage.attachments,
+  );
+  return { analysis, detector: stage.detector, gateSkipped: false };
 }
 
 async function handleMessage(msg: QueueMessage): Promise<void> {
@@ -279,7 +357,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
   }
 
   try {
-    const analysis = await analyzeEvent(row);
+    const { analysis, detector, gateSkipped } = await analyzeEvent(row);
     if (analysis) {
       await updateAi(eventId, {
         verified: analysis.verified,
@@ -287,6 +365,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
         description_th: analysis.description_th,
         model: analysis.model,
         processed_at: new Date().toISOString(),
+        detector,
       });
       console.log(
         `worker: ${eventId} → ${analysis.verified ? "จริง" : "หลอก"} [${analysis.severity}] ${analysis.description_th}`,
@@ -296,6 +375,19 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
       } else {
         await maybeSendLineAlert(row, analysis);
       }
+    } else if (gateSkipped) {
+      // ADR-015 gate: detector saw no person/vehicle in a motion-type event —
+      // record it as a false alarm without paying for the VLM. Visible on the
+      // dashboard, no LINE. Never inherited (verified=false).
+      await updateAi(eventId, {
+        verified: false,
+        severity: "info",
+        description_th: "ไม่พบคน/รถในภาพ (กรองโดยตัวตรวจจับก่อนถึง AI)",
+        model: DETECTOR_GATE_MODEL,
+        processed_at: new Date().toISOString(),
+        detector,
+      });
+      console.log(`worker: ${eventId} → ⏭️ กรองโดย detector (ไม่เรียก Gemini)`);
     } else {
       // No snapshot to analyze — still stamp processed_at so reconciliation
       // knows this event is settled and never re-enqueues it.
@@ -305,6 +397,7 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
         description_th: null,
         model: null,
         processed_at: new Date().toISOString(),
+        detector,
       });
     }
     await ack(msg.msg_id);
@@ -826,6 +919,16 @@ async function drainQueue(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log("tassana-ai worker: started (pgmq → Gemini → events.ai)");
+  // ADR-015: warm the detector at boot so the first event does not pay for
+  // the model download + session creation. Failure here is not fatal.
+  if (DETECTOR_MODE !== "off") {
+    console.log(`worker: detector mode=${DETECTOR_MODE}, warming up…`);
+    void getDetector().then((m) => {
+      if (!m) console.warn(`worker: detector unavailable (${detectorDisabledReason()}) — running without it (fail-open)`);
+    });
+  } else {
+    console.log("worker: detector off (YOLO_MODE=off)");
+  }
   void checkHeartbeats();
   setInterval(() => void checkHeartbeats(), HEARTBEAT_CHECK_MS);
   void reconcileStuckEvents();

@@ -16,13 +16,15 @@
     "agent:relay": "tsx worker/agent/relay.ts",
     "test:ai": "tsx worker/tools/accuracy-test.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:detector": "tsx worker/tools/detector-test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.49.0",
     "jimp": "^1.6.0",
     "next": "^15.4.0",
+    "onnxruntime-node": "^1.27.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "uuid": "^11.1.0"

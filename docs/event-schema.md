@@ -44,8 +44,16 @@ interface NormalizedEvent {
     verified: boolean | null;      // null = ยังไม่วิเคราะห์, true = เหตุจริง, false = หลอก
     severity: "info" | "warning" | "critical" | null;
     description_th: string | null; // คำบรรยายภาษาไทยจาก VLM
-    model: string | null;
+    model: string | null;         // ชื่อโมเดล VLM, "…+inherit" = สืบทอดคำตัดสิน, "detector-gate" = ถูกกรองโดย detector ไม่เรียก VLM (ADR-015)
     processed_at: string | null;
+    detector?: {                   // ADR-015 (optional) ผลตัวตรวจจับวัตถุบน worker ก่อนถึง VLM
+      model: string;               // เช่น "yolox_s"
+      mode: "shadow" | "gate";
+      ms: number;
+      objects: { label: string; confidence: number; bbox: [number, number, number, number] }[]; // bbox normalized 0-1
+      gate: "analyze" | "skip" | "would-skip"; // would-skip = โหมด shadow บอกว่าถ้าเปิด gate จะข้าม
+      reason: string;
+    } | null;
   };
   raw: Record<string, unknown>;    // payload ดิบทั้งก้อน เก็บเสมอ (debug + จูนภายหลัง)
 }

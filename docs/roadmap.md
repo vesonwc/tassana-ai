@@ -97,6 +97,16 @@
 - [x] แท็บ 🧠 ความรู้: ดู/เพิ่ม/ลบ
 - [x] **E2E จริงผ่าน:** ผู้ใช้ตอบคำถามแรก → ระบบรู้จัก "บองกี้" สุนัขชิวาว่าของบ้าน ✅
 
+## ตัวตรวจจับวัตถุบน worker — "สมองฉลาดเอง ไม่พึ่งกล้อง" (ADR-015) [สถานะ: โค้ดเสร็จ 2026-08-18 — รอทดสอบกับภาพจริง แล้วเปิด shadow]
+- [x] ADR-015: YOLOX-s (Apache-2.0) บน onnxruntime-node ไม่มี Python, โหมด off/shadow/gate, fail-open ตาม ADR-005
+- [x] `lib/detector-core.ts` (ถอดผล YOLOX/YOLOv8, NMS, กติกากรอง, hint ไทย, crop) + 17 test; `worker/detector.ts` (โหลดโมเดลอัตโนมัติจาก YOLO_MODEL_URL, timeout 3 วิ)
+- [x] ต่อเข้า worker: บันทึก `events.ai.detector`, gate ข้าม Gemini เมื่อไม่พบคน/รถ (`model="detector-gate"`, ไม่แจ้ง LINE), crop บริเวณคน/รถแนบเป็นภาพที่ 2 + hint ใน prompt
+- [x] เครื่องมือ `npm run test:detector <โฟลเดอร์ภาพ>` — บอกว่าแต่ละภาพจะถูกกรอง/ส่ง และเขียน crop ลง testdata/detector-out
+- [ ] รัน test:detector กับภาพจากกล้องออฟฟิศ ดู false-negative (คนที่ detector มองไม่เห็น) และเวลาเฉลี่ย
+- [ ] ตั้ง `YOLO_MODE=shadow` บน Railway 1–2 สัปดาห์ → นับ would-skip เทียบกับ verdict Gemini/คน; ถ้าพลาดเหตุจริง < 1% ค่อยเปิด `gate`
+- [ ] แสดงกล่อง detector บนหน้า event ใน dashboard (ตอนนี้เก็บใน ai.detector แล้วแต่ยังไม่วาด)
+- ไม่ทำ: pose/โครงกระดูก (คนล้ม) — รอโหมดกล่อง Edge ที่มี stream
+
 ## หลัง MVP (ยังไม่ทำ — จดไว้กันลืม)
 - Frigate adapter (โหมดกล่อง Edge) / LPR + ฐานทะเบียนรถ / รายงานรายเดือน
 - ระบบ billing / หน้า onboarding ไซต์ใหม่แบบ self-serve

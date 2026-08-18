@@ -40,6 +40,14 @@ export interface SnapshotContext {
   // recent verdicts humans marked as false alarms.
   baseline?: string | null;
   falseAlarmExamples?: string[];
+  // ADR-015: hedged one-liner from the object detector ("พบ คน 2 …").
+  detectorHint?: string | null;
+}
+
+// ADR-015: extra image parts sent after the main snapshot (e.g. a zoomed crop).
+export interface VlmAttachment {
+  base64: string;
+  mimeType: string;
 }
 
 // Layer 1 (ADR-011): universal watch list. Every camera, cannot be disabled.
@@ -113,6 +121,8 @@ export function buildPrompt(ctx: SnapshotContext): string {
       `ตัวอย่างการตัดสินของกล้องนี้ที่ผู้ดูแลเคยบอกว่า "แจ้งเท็จ" (อย่าทำซ้ำแบบเดียวกัน): ${ctx.falseAlarmExamples.map((e) => `"${e}"`).join(" / ")}`,
     );
   }
+
+  if (ctx.detectorHint) lines.push(ctx.detectorHint);
 
   const instructions = [ctx.siteInstructions, ctx.cameraInstructions]
     .map((s) => s?.trim())
@@ -213,6 +223,7 @@ export async function analyzeSnapshot(
   mimeType: string,
   ctx: SnapshotContext,
   modelOverride?: string,
+  attachments: VlmAttachment[] = [],
 ): Promise<VlmAnalysis> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new VlmError("GEMINI_API_KEY is not set");
@@ -220,6 +231,10 @@ export async function analyzeSnapshot(
   // flash is the fallback. Swap via GEMINI_MODEL env when billing arrives.
   const model =
     modelOverride ?? process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";
+  const imageParts = [
+    { inline_data: { mime_type: mimeType, data: imageBase64 } },
+    ...attachments.map((a) => ({ inline_data: { mime_type: a.mimeType, data: a.base64 } })),
+  ];
 
   let response: Response;
   try {
@@ -234,10 +249,7 @@ export async function analyzeSnapshot(
         body: JSON.stringify({
           contents: [
             {
-              parts: [
-                { inline_data: { mime_type: mimeType, data: imageBase64 } },
-                { text: buildPrompt(ctx) },
-              ],
+              parts: [...imageParts, { text: buildPrompt(ctx) }],
             },
           ],
           generationConfig: {

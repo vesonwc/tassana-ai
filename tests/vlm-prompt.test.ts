@@ -72,3 +72,11 @@ describe("isWithinStrictHours", () => {
     expect(isWithinStrictHours("15:00", "12:00", "14:00")).toBe(false);
   });
 });
+
+describe("buildPrompt — detector hint (ADR-015)", () => {
+  it("includes the hedged detector line only when provided", () => {
+    const hint = "ตัวตรวจจับวัตถุเบื้องต้นพบ: คน 2 (ความมั่นใจ 0.87, 0.71) — ตัวเลขนี้เป็นเพียงคำใบ้ อาจผิดได้";
+    expect(buildPrompt({ ...BASE_CTX, detectorHint: hint })).toContain("คน 2");
+    expect(buildPrompt(BASE_CTX)).not.toContain("ตัวตรวจจับวัตถุเบื้องต้น");
+  });
+});
