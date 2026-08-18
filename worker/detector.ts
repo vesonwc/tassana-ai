@@ -12,6 +12,7 @@ import {
   cropRegion,
   decodeOutput,
   detectLayout,
+  nms,
   parseDetectorMode,
   type Box,
   type DetectorMode,
@@ -20,16 +21,34 @@ import {
 } from "../lib/detector-core";
 
 export const DETECTOR_MODE: DetectorMode = parseDetectorMode(process.env.YOLO_MODE);
-// YOLOX-s: Apache-2.0, official Megvii release (ADR-015 §2).
+// YOLOX-tiny: Apache-2.0, official Megvii release (ADR-015 §2). Measured on
+// 150 real office events: the yolox_s.onnx from the same release scores
+// objectness < 0.35 on obvious people (broken export?) while tiny + tiled
+// passes catch small night-time figures — see docs/roadmap.md.
 const DEFAULT_MODEL_URL =
-  "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx";
-export const MODEL_PATH = process.env.YOLO_MODEL_PATH ?? "models/yolox_s.onnx";
+  "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx";
+export const MODEL_PATH = process.env.YOLO_MODEL_PATH ?? "models/yolox_tiny.onnx";
 const MODEL_URL = process.env.YOLO_MODEL_URL ?? DEFAULT_MODEL_URL;
-const CONF_THRESHOLD = Number(process.env.YOLO_CONF ?? 0.35);
+const CONF_THRESHOLD = Number(process.env.YOLO_CONF ?? 0.3);
 const IOU_THRESHOLD = Number(process.env.YOLO_IOU ?? 0.45);
 export const DETECTOR_TIMEOUT_MS = Number(process.env.YOLO_TIMEOUT_MS ?? 3_000);
 const LAYOUT_OVERRIDE = process.env.YOLO_LAYOUT as OutputLayout | undefined;
 const THREADS = Number(process.env.YOLO_THREADS ?? 2);
+// YOLOX weights from the 0.1.x era were trained with ImageNet mean/std on RGB.
+const YOLOX_LEGACY = process.env.YOLOX_LEGACY === "1";
+// 1 = full frame only, 4 = full frame + 2x2 overlapping tiles (small people).
+const TILES = Number(process.env.YOLO_TILES ?? 4) === 4 ? 4 : 1;
+
+// Fraction of `a` that lies inside `b`.
+function containment(a: Box, b: Box): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w);
+  const y2 = Math.min(a.y + a.h, b.y + b.h);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const area = a.w * a.h;
+  return area <= 0 ? 0 : inter / area;
+}
 
 export interface DetectorRun {
   detections: ObjectDetection[];
@@ -151,9 +170,17 @@ function preprocess(
   const src = resized.bitmap.data; // RGBA
   const plane = inputW * inputH;
   const tensor = new Float32Array(3 * plane);
-  const pad = isYolox ? 114 : 114 / 255;
-  tensor.fill(pad);
-  const scale = isYolox ? 1 : 1 / 255;
+  // Three preprocessing conventions:
+  //  - yolox (current):  BGR, raw 0-255, pad 114
+  //  - yolox legacy:     RGB, /255, ImageNet mean/std, pad 114 (0.1.x weights)
+  //  - yolov8:           RGB, /255, pad 114/255
+  const legacy = isYolox && YOLOX_LEGACY;
+  const mean = legacy ? [0.485, 0.456, 0.406] : [0, 0, 0];
+  const std = legacy ? [0.229, 0.224, 0.225] : [1, 1, 1];
+  const scale = isYolox && !legacy ? 1 : 1 / 255;
+  const padRaw = isYolox && !legacy ? 114 : 114 / 255;
+  for (let c = 0; c < 3; c++) tensor.fill((padRaw - mean[c]) / std[c], c * plane, (c + 1) * plane);
+  const bgr = isYolox && !legacy;
   for (let y = 0; y < lb.resizedH; y++) {
     const oy = y + lb.padY;
     for (let x = 0; x < lb.resizedW; x++) {
@@ -163,10 +190,11 @@ function preprocess(
       const g = src[s + 1] * scale;
       const b = src[s + 2] * scale;
       const d = oy * inputW + ox;
-      // channel order: BGR for YOLOX (cv2 convention), RGB otherwise
-      tensor[d] = isYolox ? b : r;
-      tensor[plane + d] = g;
-      tensor[2 * plane + d] = isYolox ? r : b;
+      const c0 = bgr ? b : r;
+      const c2 = bgr ? r : b;
+      tensor[d] = (c0 - mean[0]) / std[0];
+      tensor[plane + d] = (g - mean[1]) / std[1];
+      tensor[2 * plane + d] = (c2 - mean[2]) / std[2];
     }
   }
   return { tensor, lb };
@@ -184,8 +212,8 @@ export async function detectObjects(imageBuffer: Buffer): Promise<DetectorRun | 
 
     // First run: sniff the layout from a dry decode of output dims.
     let layout = model.layout;
-    const runOnce = async (lay: OutputLayout) => {
-      const { tensor, lb } = preprocess(img, model.inputW, model.inputH, lay);
+    const runOnce = async (region: JimpImage, lay: OutputLayout) => {
+      const { tensor, lb } = preprocess(region, model.inputW, model.inputH, lay);
       const feeds = {
         [model.inputName]: new model.ort.Tensor("float32", tensor, [1, 3, model.inputH, model.inputW]),
       };
@@ -193,7 +221,7 @@ export async function detectObjects(imageBuffer: Buffer): Promise<DetectorRun | 
       const t = out[model.outputName];
       return { t, lb };
     };
-    let { t, lb } = await runOnce(layout ?? "yolox");
+    let { t, lb } = await runOnce(img, layout ?? "yolox");
     if (!layout) {
       layout = detectLayout(t.dims as number[]);
       if (!layout) {
@@ -202,13 +230,36 @@ export async function detectObjects(imageBuffer: Buffer): Promise<DetectorRun | 
       }
       model.layout = layout;
       // Preprocessing differs per family; redo if the guess was wrong.
-      if (layout !== "yolox") ({ t, lb } = await runOnce(layout));
+      if (layout !== "yolox") ({ t, lb } = await runOnce(img, layout));
     }
-    const detections = decodeOutput(t.data as Float32Array, t.dims as number[], lb, width, height, {
-      confThreshold: CONF_THRESHOLD,
-      iouThreshold: IOU_THRESHOLD,
-      layout,
-    });
+    const decodeOpts = { confThreshold: CONF_THRESHOLD, iouThreshold: IOU_THRESHOLD, layout };
+    const all: ObjectDetection[] = decodeOutput(t.data as Float32Array, t.dims as number[], lb, width, height, decodeOpts);
+
+    // Tiled passes (ADR-015): CCTV frames are wide and people are small; a
+    // 2x2 grid with overlap roughly doubles their size in the model's eyes.
+    // Costs TILES extra inferences — still cheap next to one VLM call.
+    if (TILES === 4) {
+      const ov = 0.15;
+      const tw = Math.round(width * (0.5 + ov / 2));
+      const th = Math.round(height * (0.5 + ov / 2));
+      const origins = [
+        [0, 0],
+        [width - tw, 0],
+        [0, height - th],
+        [width - tw, height - th],
+      ];
+      for (const [ox, oy] of origins) {
+        const tile = img.clone().crop({ x: ox, y: oy, w: tw, h: th }) as unknown as JimpImage;
+        const r = await runOnce(tile, layout);
+        const dets = decodeOutput(r.t.data as Float32Array, r.t.dims as number[], r.lb, tw, th, decodeOpts);
+        for (const d of dets) all.push({ ...d, box: { ...d.box, x: d.box.x + ox, y: d.box.y + oy } });
+      }
+    }
+    // Drop tile-edge slivers (a person cut in half by a tile border) that a
+    // fuller box already covers, then merge duplicates across passes.
+    const detections = nms(all, IOU_THRESHOLD).filter((d, _, arr) =>
+      !arr.some((o) => o !== d && o.label === d.label && o.confidence >= d.confidence && containment(d.box, o.box) > 0.7),
+    );
     return { detections, width, height, ms: Date.now() - started, model: model.name };
   })();
 

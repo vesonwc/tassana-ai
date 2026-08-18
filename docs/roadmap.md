@@ -102,8 +102,11 @@
 - [x] `lib/detector-core.ts` (ถอดผล YOLOX/YOLOv8, NMS, กติกากรอง, hint ไทย, crop) + 17 test; `worker/detector.ts` (โหลดโมเดลอัตโนมัติจาก YOLO_MODEL_URL, timeout 3 วิ)
 - [x] ต่อเข้า worker: บันทึก `events.ai.detector`, gate ข้าม Gemini เมื่อไม่พบคน/รถ (`model="detector-gate"`, ไม่แจ้ง LINE), crop บริเวณคน/รถแนบเป็นภาพที่ 2 + hint ใน prompt
 - [x] เครื่องมือ `npm run test:detector <โฟลเดอร์ภาพ>` — บอกว่าแต่ละภาพจะถูกกรอง/ส่ง และเขียน crop ลง testdata/detector-out
-- [ ] รัน test:detector กับภาพจากกล้องออฟฟิศ ดู false-negative (คนที่ detector มองไม่เห็น) และเวลาเฉลี่ย
-- [ ] ตั้ง `YOLO_MODE=shadow` บน Railway 1–2 สัปดาห์ → นับ would-skip เทียบกับ verdict Gemini/คน; ถ้าพลาดเหตุจริง < 1% ค่อยเปิด `gate`
+- [x] `worker/tools/detector-shadow.ts` — replay event จริงจาก Supabase ผ่าน detector แล้วเทียบกับ verdict Gemini (shadow แบบออฟไลน์ ไม่ต้องรอ 2 สัปดาห์)
+- [x] **วัดจริง 150 event (2026-08-18):** yolox_s จาก release ใช้ไม่ได้ (objectness ต่ำผิดปกติ) → ใช้ yolox_tiny + tiled 2×2 + เกณฑ์ 0.3: กรอง Gemini ได้ 20% (29/144), 260 ms/ภาพบนโน้ตบุ๊ก, พลาดของจริง 1 ภาพ (ch16 พนักงานนั่งโต๊ะ ระดับ info); คนเสื้อเข้มกลางคืน (warning) จับได้; ที่ "พลาด" อีก 8 ภาพคือ ch7 ที่ Gemini เองก็ว่า "ออฟฟิศปิด ไม่มีคน" (verified=true จากโปรไฟล์ office ไม่ใช่เหตุจริง)
+  - เกณฑ์ 0.4 กรองได้ 28% แต่พลาดคนกลางคืน / 0.2 กรองได้ 10% — จูนได้ด้วย `YOLO_CONF` ต่อ deploy
+  - ข้อจำกัดที่เห็น: sub-stream DVR แค่ 704×480 → คนไกลเหลือ ~15 px ตัว detector ใดก็เหนื่อย; ถ้าจะแม่นขึ้นต้องดึง main-stream snapshot จาก DVR (งาน listener)
+- [ ] ตั้ง `YOLO_MODE=shadow` บน Railway (env) → ดู `ai.detector.gate` สัก 1 สัปดาห์ (รัน detector-shadow ซ้ำได้ทุกเมื่อ); ถ้าไม่พลาด warning/critical เลย ค่อยเปิด `gate`
 - [ ] แสดงกล่อง detector บนหน้า event ใน dashboard (ตอนนี้เก็บใน ai.detector แล้วแต่ยังไม่วาด)
 - ไม่ทำ: pose/โครงกระดูก (คนล้ม) — รอโหมดกล่อง Edge ที่มี stream
 

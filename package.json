@@ -17,7 +17,8 @@
     "test:ai": "tsx worker/tools/accuracy-test.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:detector": "tsx worker/tools/detector-test.ts"
+    "test:detector": "tsx worker/tools/detector-test.ts",
+    "test:detector:shadow": "tsx worker/tools/detector-shadow.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
