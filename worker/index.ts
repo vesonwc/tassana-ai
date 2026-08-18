@@ -196,6 +196,15 @@ async function runDetectorStage(
   return { detector, skip: false, hint: buildDetectorHint(run.detections), attachments };
 }
 
+// The detector already did its work before the VLM was called; a VLM failure
+// must not throw that away (shadow mode depends on it).
+class AnalyzeFailure extends Error {
+  constructor(readonly cause: Error, readonly detector: DetectorSummary | null) {
+    super(cause.message);
+    this.name = "AnalyzeFailure";
+  }
+}
+
 interface AnalyzeOutcome {
   analysis: VlmAnalysis | null;
   detector: DetectorSummary | null;
@@ -258,7 +267,9 @@ async function analyzeEvent(row: EventRow): Promise<AnalyzeOutcome> {
   }
 
   // Assemble the config layers (ADR-011/013/014/015) from data, not code.
-  const analysis = await analyzeWithFallback(
+  let analysis: VlmAnalysis;
+  try {
+    analysis = await analyzeWithFallback(
     base64,
     mime,
     {
@@ -276,8 +287,11 @@ async function analyzeEvent(row: EventRow): Promise<AnalyzeOutcome> {
       strictHours: row.sites?.rules?.strict_hours ?? null,
       nowBangkok: bangkokNowHHmm(),
     },
-    stage.attachments,
-  );
+      stage.attachments,
+    );
+  } catch (err) {
+    throw new AnalyzeFailure(err as Error, stage.detector);
+  }
   return { analysis, detector: stage.detector, gateSkipped: false };
 }
 
@@ -402,10 +416,12 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
     }
     await ack(msg.msg_id);
   } catch (err) {
-    const isTimeout = err instanceof VlmTimeoutError;
+    const failure = err instanceof AnalyzeFailure ? err : null;
+    const real = failure ? failure.cause : (err as Error);
+    const isTimeout = real instanceof VlmTimeoutError;
     console.error(
       `worker: ${eventId} attempt ${msg.read_ct} failed${isTimeout ? " (timeout)" : ""}:`,
-      (err as Error).message,
+      real.message,
     );
     if (msg.read_ct >= MAX_ATTEMPTS) {
       // Fail open: give up on analysis, mark as processed-without-result so the
@@ -416,6 +432,8 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
         description_th: null,
         model: null,
         processed_at: new Date().toISOString(),
+        // Keep what the detector saw even though the VLM never answered.
+        detector: failure?.detector ?? null,
       });
       await ack(msg.msg_id);
       console.error(`worker: ${eventId} gave up after ${MAX_ATTEMPTS} attempts (fail-open)`);
