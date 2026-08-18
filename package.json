@@ -19,7 +19,8 @@
     "test:watch": "vitest",
     "test:detector": "tsx worker/tools/detector-test.ts",
     "test:detector:shadow": "tsx worker/tools/detector-shadow.ts",
-    "test:triage": "tsx worker/tools/triage-sim.ts"
+    "test:triage": "tsx worker/tools/triage-sim.ts",
+    "stats": "tsx worker/tools/event-stats.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
