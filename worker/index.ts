@@ -11,7 +11,7 @@ import {
 } from "../lib/vlm";
 import type { AiResult, DetectorSummary, EventType, Severity } from "../lib/types";
 import { buildDetectorHint, decideGate, normalizeBox, summarizeLabels } from "../lib/detector-core";
-import { cropForVlm, detectObjects, detectorDisabledReason, detectorReady, DETECTOR_MODE, warmDetector } from "./detector";
+import { cropForVlm, detectObjects, detectorDisabledReason, detectorReady, DETECTOR_MODE, MODEL_PATH, warmDetector } from "./detector";
 import { buildAlertFlex, buildDailyReportText, pushLineMessage } from "../lib/line";
 import { TYPE_TH } from "../lib/labels";
 
@@ -851,7 +851,17 @@ async function learnBaselines(): Promise<void> {
 async function pulseSystemStatus(): Promise<void> {
   const { error } = await supabase.from("system_status").upsert({
     key: "worker_heartbeat",
-    value: { pid: process.pid },
+    // Detector state travels with the heartbeat so it can be diagnosed from
+    // anywhere (Railway logs are not reachable from a dev laptop).
+    value: {
+      pid: process.pid,
+      detector: {
+        mode: DETECTOR_MODE,
+        ready: detectorReady(),
+        reason: detectorDisabledReason(),
+        model: MODEL_PATH,
+      },
+    },
     updated_at: new Date().toISOString(),
   });
   if (error) console.error("worker: status pulse failed", error.message);
