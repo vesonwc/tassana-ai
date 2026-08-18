@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getSessionClient, getUserAndProfile } from "@/lib/supabase-auth";
 import { formatThaiTime } from "@/lib/labels";
 import { addKnowledge, deleteKnowledge, saveBaseline, saveCameraConfig, saveSiteRules } from "./actions";
-import { rotateSiteKey, saveLineTarget } from "@/app/dashboard/admin/actions";
+import { deleteSite, rotateSiteKey, saveLineTarget } from "@/app/dashboard/admin/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -86,10 +86,10 @@ export default async function SiteSettingsPage({
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{ tab?: string; saved?: string; q?: string }>;
+  searchParams: Promise<{ tab?: string; saved?: string; q?: string; delete?: string }>;
 }) {
   const { siteId } = await params;
-  const { tab: rawTab = "alerts", saved, q = "" } = await searchParams;
+  const { tab: rawTab = "alerts", saved, q = "", delete: deleteError } = await searchParams;
 
   const session = await getUserAndProfile();
   const isAdmin = session?.profile.role === "admin";
@@ -433,6 +433,31 @@ export default async function SiteSettingsPage({
               </div>
             ))}
             {cameras.length === 0 && <p style={{ color: "#9E9E9E", fontSize: "0.9rem" }}>ยังไม่มีกล้อง — ตั้งค่า NVR ตามข้อ 2 แล้วรอ event แรก</p>}
+          </section>
+
+          <section style={{ ...box, border: "1px solid #F3C9C9", background: "#FFF8F8" }}>
+            <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem", color: "#B3261E" }}>5. ลบโครงการนี้</h2>
+            <p style={{ margin: "0 0 0.5rem", color: "#8A6D6D", fontSize: "0.85rem" }}>
+              ลบแล้วกู้คืนไม่ได้ — กล้อง {cameras.length} ตัว, เหตุการณ์และรูปทั้งหมด, รายงาน และความรู้ของโครงการนี้จะหายไปพร้อมกัน
+              {" "}พิมพ์ชื่อโครงการ <strong>{site.name}</strong> ให้ตรงเพื่อยืนยัน
+            </p>
+            {deleteError === "name-mismatch" && (
+              <p style={{ margin: "0 0 0.5rem", color: "#B3261E", fontSize: "0.85rem", fontWeight: 600 }}>
+                ชื่อที่พิมพ์ไม่ตรงกับชื่อโครงการ — ยังไม่ได้ลบอะไร
+              </p>
+            )}
+            <form action={deleteSite} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <input type="hidden" name="siteId" value={siteId} />
+              <input
+                name="confirmName"
+                placeholder={site.name}
+                autoComplete="off"
+                style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+              />
+              <button style={{ padding: "0.5rem 1.2rem", borderRadius: 999, border: "none", background: "#B3261E", color: "#fff", fontSize: "0.9rem", fontWeight: 600, cursor: "pointer" }}>
+                ลบโครงการถาวร
+              </button>
+            </form>
           </section>
         </>
       )}

@@ -94,3 +94,50 @@ export async function createUser(
   }
   return { email, password };
 }
+
+// Permanently remove a site and everything attached to it. Cameras, events,
+// alerts, reports and knowledge disappear by cascade; snapshot files are not
+// covered by the database cascade, so they are removed explicitly first.
+// Guarded by typing the site name — this cannot be undone.
+export async function deleteSite(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const siteId = String(formData.get("siteId") ?? "");
+  const typed = String(formData.get("confirmName") ?? "").trim();
+  if (!siteId) return;
+  const service = getServiceClient();
+
+  const { data: site } = await service
+    .from("sites")
+    .select("name")
+    .eq("id", siteId)
+    .maybeSingle();
+  if (!site) return;
+  if (typed !== site.name.trim()) {
+    redirect(`/dashboard/sites/${siteId}/settings?tab=connect&delete=name-mismatch`);
+  }
+
+  // Storage first: once the rows are gone we can no longer find the paths.
+  const paths: string[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: batch } = await service
+      .from("events")
+      .select("media")
+      .eq("site_id", siteId)
+      .range(from, from + 999);
+    if (!batch || batch.length === 0) break;
+    for (const row of batch) {
+      const p = (row as { media?: { snapshot_path?: string | null } }).media?.snapshot_path;
+      if (p) paths.push(p);
+    }
+    if (batch.length < 1000) break;
+  }
+  for (let i = 0; i < paths.length; i += 100) {
+    const { error } = await service.storage.from("snapshots").remove(paths.slice(i, i + 100));
+    if (error) console.error("deleteSite: storage remove failed", error.message);
+  }
+
+  const { error } = await service.from("sites").delete().eq("id", siteId);
+  if (error) throw new Error(`delete site failed: ${error.message}`);
+  revalidatePath("/dashboard");
+  redirect("/dashboard?deleted=1");
+}
