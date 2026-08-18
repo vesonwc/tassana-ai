@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { detectObjects, detectorDisabledReason, MODEL_PATH } from "../detector";
+import { detectObjects, detectorDisabledReason, loadDetectorNow, MODEL_PATH } from "../detector";
 import { decideGate, summarizeLabels } from "../../lib/detector-core";
 import type { AiResult } from "../../lib/types";
 
@@ -39,6 +39,10 @@ interface Row {
 }
 
 async function main(): Promise<void> {
+  if (!(await loadDetectorNow())) {
+    console.error(`detector load failed: ${detectorDisabledReason()}`);
+    process.exit(1);
+  }
   mkdirSync(OUT_DIR, { recursive: true });
   const { data, error } = await supabase
     .from("events")

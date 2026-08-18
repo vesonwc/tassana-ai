@@ -11,7 +11,7 @@ import {
 } from "../lib/vlm";
 import type { AiResult, DetectorSummary, EventType, Severity } from "../lib/types";
 import { buildDetectorHint, decideGate, normalizeBox, summarizeLabels } from "../lib/detector-core";
-import { cropForVlm, detectObjects, detectorDisabledReason, DETECTOR_MODE, getDetector } from "./detector";
+import { cropForVlm, detectObjects, detectorDisabledReason, detectorReady, DETECTOR_MODE, warmDetector } from "./detector";
 import { buildAlertFlex, buildDailyReportText, pushLineMessage } from "../lib/line";
 import { TYPE_TH } from "../lib/labels";
 
@@ -922,10 +922,12 @@ async function main(): Promise<void> {
   // ADR-015: warm the detector at boot so the first event does not pay for
   // the model download + session creation. Failure here is not fatal.
   if (DETECTOR_MODE !== "off") {
-    console.log(`worker: detector mode=${DETECTOR_MODE}, warming up…`);
-    void getDetector().then((m) => {
-      if (!m) console.warn(`worker: detector unavailable (${detectorDisabledReason()}) — running without it (fail-open)`);
-    });
+    console.log(`worker: detector mode=${DETECTOR_MODE}, loading model in background…`);
+    warmDetector();
+    // Retry loop is cheap and self-throttling; the pipeline never waits on it.
+    setInterval(() => {
+      if (!detectorReady()) warmDetector();
+    }, 60_000);
   } else {
     console.log("worker: detector off (YOLO_MODE=off)");
   }

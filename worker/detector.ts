@@ -72,8 +72,23 @@ interface LoadedModel {
   name: string;
 }
 
-let loading: Promise<LoadedModel | null> | null = null;
+// Loading happens ONLY in the background, never inside the event pipeline:
+// a stalled download or a wedged native session must never hold up the queue
+// (ADR-005/015 fail-open). Events that arrive before the model is ready simply
+// go straight to the VLM.
+type LoadState = "idle" | "loading" | "ready" | "failed";
+let loadState: LoadState = "idle";
+let loaded: LoadedModel | null = null;
+let nextRetryAt = 0;
 let disabledReason: string | null = null;
+// Cold start on Railway = download + session create. Generous, but bounded.
+const MODEL_LOAD_TIMEOUT_MS = Number(process.env.YOLO_LOAD_TIMEOUT_MS ?? 180_000);
+const LOAD_RETRY_MS = Number(process.env.YOLO_LOAD_RETRY_MS ?? 10 * 60_000);
+// If detection keeps timing out, stop trying for this process — a slow box
+// must degrade to "no detector", never to a slow pipeline.
+const MAX_CONSECUTIVE_TIMEOUTS = Number(process.env.YOLO_MAX_TIMEOUTS ?? 5);
+let consecutiveTimeouts = 0;
+let givenUp = false;
 
 export function modelName(): string {
   return MODEL_PATH.split(/[\\/]/).pop()?.replace(/\.onnx$/i, "") ?? "detector";
@@ -146,12 +161,56 @@ async function loadModel(): Promise<LoadedModel | null> {
   }
 }
 
-export function getDetector(): Promise<LoadedModel | null> {
-  if (!loading) loading = loadModel();
-  return loading;
+// Kick off (or retry) a background load. Returns immediately — never awaited
+// by the pipeline.
+export function warmDetector(): void {
+  if (givenUp || loadState === "loading" || loadState === "ready") return;
+  if (Date.now() < nextRetryAt) return;
+  loadState = "loading";
+  const started = Date.now();
+  const timeout = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), MODEL_LOAD_TIMEOUT_MS).unref(),
+  );
+  void Promise.race([loadModel(), timeout])
+    .then((model) => {
+      if (model) {
+        loaded = model;
+        loadState = "ready";
+        disabledReason = null;
+        console.log(`detector: ready after ${Math.round((Date.now() - started) / 1000)}s`);
+        return;
+      }
+      loadState = "failed";
+      nextRetryAt = Date.now() + LOAD_RETRY_MS;
+      disabledReason ??= `model load exceeded ${MODEL_LOAD_TIMEOUT_MS}ms`;
+      console.warn(`detector: load failed (${disabledReason}) — running without it, retry in ${Math.round(LOAD_RETRY_MS / 60000)} min`);
+    })
+    .catch((err) => {
+      loadState = "failed";
+      nextRetryAt = Date.now() + LOAD_RETRY_MS;
+      disabledReason = (err as Error).message;
+      console.warn(`detector: load threw (${disabledReason}) — running without it`);
+    });
+}
+
+export function detectorReady(): boolean {
+  return loadState === "ready" && !givenUp;
+}
+
+// For CLI tools only: block until the model is loaded (or failed). The worker
+// pipeline must never call this.
+export async function loadDetectorNow(): Promise<boolean> {
+  for (;;) {
+    if (detectorReady()) return true;
+    if (loadState === "failed" || givenUp) return false;
+    warmDetector();
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 export function detectorDisabledReason(): string | null {
+  if (givenUp) return "disabled after repeated timeouts";
+  if (loadState === "loading") return "model still loading";
   return disabledReason;
 }
 
@@ -203,7 +262,13 @@ function preprocess(
 // Run the detector on an encoded image. Resolves null on any failure/timeout.
 export async function detectObjects(imageBuffer: Buffer): Promise<DetectorRun | null> {
   const started = Date.now();
-  const model = await getDetector();
+  // Never wait for the model here — if it is not loaded yet, this event just
+  // goes to the VLM unfiltered while the load continues in the background.
+  if (!detectorReady()) {
+    warmDetector();
+    return null;
+  }
+  const model = loaded;
   if (!model) return null;
   const work = (async (): Promise<DetectorRun | null> => {
     const img = await Jimp.read(imageBuffer);
@@ -268,7 +333,18 @@ export async function detectObjects(imageBuffer: Buffer): Promise<DetectorRun | 
   );
   try {
     const result = await Promise.race([work, timeout]);
-    if (!result) console.warn(`detector: no result within ${DETECTOR_TIMEOUT_MS}ms — fail open`);
+    if (!result) {
+      consecutiveTimeouts += 1;
+      console.warn(
+        `detector: no result within ${DETECTOR_TIMEOUT_MS}ms — fail open (${consecutiveTimeouts}/${MAX_CONSECUTIVE_TIMEOUTS})`,
+      );
+      if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+        givenUp = true;
+        console.warn("detector: too many timeouts — disabled for this process, pipeline continues without it");
+      }
+    } else {
+      consecutiveTimeouts = 0;
+    }
     return result;
   } catch (err) {
     console.warn(`detector: failed — fail open: ${(err as Error).message}`);

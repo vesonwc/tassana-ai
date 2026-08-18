@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { cropForVlm, detectObjects, detectorDisabledReason, DETECTOR_MODE, MODEL_PATH } from "../detector";
+import { cropForVlm, detectObjects, detectorDisabledReason, loadDetectorNow, DETECTOR_MODE, MODEL_PATH } from "../detector";
 import { buildDetectorHint, decideGate, summarizeLabels } from "../../lib/detector-core";
 
 // ADR-015 local harness: run the detector over a folder of snapshots and show
@@ -19,6 +19,10 @@ const eventType = process.argv[3] ?? "unknown";
 const OUT_DIR = "testdata/detector-out";
 
 async function main(): Promise<void> {
+  if (!(await loadDetectorNow())) {
+    console.error(`detector load failed: ${detectorDisabledReason()}`);
+    process.exit(1);
+  }
   if (!existsSync(folder)) {
     console.error(`folder not found: ${folder}`);
     process.exit(1);
