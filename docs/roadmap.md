@@ -105,7 +105,9 @@
 - [x] `worker/tools/detector-shadow.ts` — replay event จริงจาก Supabase ผ่าน detector แล้วเทียบกับ verdict Gemini (shadow แบบออฟไลน์ ไม่ต้องรอ 2 สัปดาห์)
 - [x] **วัดจริง 150 event (2026-08-18):** yolox_s จาก release ใช้ไม่ได้ (objectness ต่ำผิดปกติ) → ใช้ yolox_tiny + tiled 2×2 + เกณฑ์ 0.3: กรอง Gemini ได้ 20% (29/144), 260 ms/ภาพบนโน้ตบุ๊ก, พลาดของจริง 1 ภาพ (ch16 พนักงานนั่งโต๊ะ ระดับ info); คนเสื้อเข้มกลางคืน (warning) จับได้; ที่ "พลาด" อีก 8 ภาพคือ ch7 ที่ Gemini เองก็ว่า "ออฟฟิศปิด ไม่มีคน" (verified=true จากโปรไฟล์ office ไม่ใช่เหตุจริง)
   - เกณฑ์ 0.4 กรองได้ 28% แต่พลาดคนกลางคืน / 0.2 กรองได้ 10% — จูนได้ด้วย `YOLO_CONF` ต่อ deploy
-  - ข้อจำกัดที่เห็น: sub-stream DVR แค่ 704×480 → คนไกลเหลือ ~15 px ตัว detector ใดก็เหนื่อย; ถ้าจะแม่นขึ้นต้องดึง main-stream snapshot จาก DVR (งาน listener)
+  - **แก้ความเข้าใจผิด (2026-08-18):** listener ขอ main stream อยู่แล้ว (`/ISAPI/Streaming/channels/{ch}01/picture` — 01 = main) แต่ DVR คืน **704×480 = D1 NTSC เป๊ะ** ทุกช่อง (~19 KB/ภาพ) → ไม่ใช่เรื่องตั้งค่าผิด แต่เป็นเพดานของกล้องอนาล็อก/ตัวเข้ารหัส JPEG ของ DVR
+  - ทดสอบย่อภาพจริงลงครึ่งหนึ่ง (352×240) → detector ยังเจอคนเท่าเดิม (16 ครั้ง, conf 0.42) แปลว่า **พิกเซลไม่ใช่คอขวดตอนนี้** เพราะ tiled inference ซูมให้อยู่แล้ว → ยังไม่ต้องรีบทำเรื่องภาพใหญ่
+  - ค้าง (ต้องอยู่หน้าคอมออฟฟิศ): `npx tsx worker/tools/nvr-picture-probe.ts 1` ดูว่า DVR ยอมให้ขอ 1920×1080 ไหม (เครื่องมืออ่านอย่างเดียว ไม่แก้ DVR) — ทำเมื่อสะดวก ไม่บล็อกอะไร
 - [ ] ตั้ง `YOLO_MODE=shadow` บน Railway (env) → ดู `ai.detector.gate` สัก 1 สัปดาห์ (รัน detector-shadow ซ้ำได้ทุกเมื่อ); ถ้าไม่พลาด warning/critical เลย ค่อยเปิด `gate`
 - [ ] แสดงกล่อง detector บนหน้า event ใน dashboard (ตอนนี้เก็บใน ai.detector แล้วแต่ยังไม่วาด)
 - ไม่ทำ: pose/โครงกระดูก (คนล้ม) — รอโหมดกล่อง Edge ที่มี stream
