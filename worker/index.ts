@@ -117,6 +117,24 @@ async function updateAi(eventId: string, ai: AiResult): Promise<void> {
   if (error) throw new Error(`update ai failed: ${error.message}`);
 }
 
+// The free tier is a daily request budget, not a rate limit: once both models
+// answer 429 there is nothing to retry until it resets (midnight Pacific =
+// 14:00 Bangkok). Spending five attempts per event against a closed door only
+// eats into the next day, so the queue waits instead.
+let vlmBlockedUntil = 0;
+function nextQuotaResetMs(): number {
+  const reset = new Date();
+  reset.setUTCHours(7, 0, 0, 0); // 14:00 Bangkok
+  if (reset.getTime() <= Date.now()) reset.setUTCDate(reset.getUTCDate() + 1);
+  return reset.getTime();
+}
+function blockVlmUntilQuotaReset(): void {
+  if (Date.now() < vlmBlockedUntil) return;
+  vlmBlockedUntil = nextQuotaResetMs();
+  const th = new Date(vlmBlockedUntil).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok" });
+  console.warn(`worker: โควตา Gemini รายวันหมด — หยุดเรียกจนถึง ${th} (คิวรอไว้ ไม่ทิ้ง event)`);
+}
+
 let lastVlmCallAt = 0;
 async function vlmThrottle(): Promise<void> {
   const wait = lastVlmCallAt + VLM_MIN_INTERVAL_MS - Date.now();
@@ -137,7 +155,13 @@ async function analyzeWithFallback(
     if (!(err instanceof VlmRateLimitError)) throw err;
     console.warn(`worker: primary model rate-limited, trying ${VLM_FALLBACK_MODEL}`);
     await vlmThrottle();
-    return analyzeSnapshot(base64, mime, ctx, VLM_FALLBACK_MODEL, attachments);
+    try {
+      return await analyzeSnapshot(base64, mime, ctx, VLM_FALLBACK_MODEL, attachments);
+    } catch (fallbackErr) {
+      // Both models refused: this is the daily cap, not a passing burst.
+      if (fallbackErr instanceof VlmRateLimitError) blockVlmUntilQuotaReset();
+      throw fallbackErr;
+    }
   }
 }
 
@@ -949,6 +973,9 @@ async function drainQueue(): Promise<void> {
   draining = true;
   try {
     for (;;) {
+      // Out of daily budget: leave everything queued rather than spending
+      // attempts that cannot succeed. pgmq redelivers once we resume.
+      if (Date.now() < vlmBlockedUntil) break;
       // vt 30s: a failed VLM attempt retries in half a minute, not 1.5 — an
       // intrusion alert cannot afford leisurely retries.
       const { data, error } = await supabase.rpc("dequeue_events", {
