@@ -117,11 +117,22 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log("\nต่อกล้อง:");
-  for (const [cam, v] of [...perCam.entries()].sort((a, b) => b[1].day + b[1].night - (a[1].day + a[1].night))) {
+  // Cost is driven by how much a camera *moves*, not by how many cameras there
+  // are: measured 2026-08-19, the parking camera costs ~7x an indoor one.
+  // 0.0135 THB/call = 2,738-token prompt + 2 images + reply at flash-lite rates.
+  const THB_PER_CALL = Number(process.env.THB_PER_VLM_CALL ?? 0.0135);
+  console.log("\nต่อกล้อง (ต้นทุน AI ประมาณการ):");
+  let monthTotal = 0;
+  for (const [cam, v] of [...perCam.entries()].sort((a, b) => b[1].calls - a[1].calls)) {
     const t = v.day + v.night;
-    console.log(`  ${cam.padEnd(26)} รวม ${String(t).padStart(4)} (${pct(t)}%) | กลางวัน ${String(v.day).padStart(4)} กลางคืน ${String(v.night).padStart(4)} | เรียก Gemini ${v.calls}`);
+    const perDay = (v.calls / DAYS) * THB_PER_CALL;
+    const perMonth = perDay * 30;
+    monthTotal += perMonth;
+    console.log(
+      `  ${cam.padEnd(26)} event ${String(t).padStart(4)} (${pct(t)}%) | กลางวัน ${String(v.day).padStart(4)} กลางคืน ${String(v.night).padStart(4)} | เรียก AI ${String(v.calls).padStart(4)} → ${perMonth.toFixed(0).padStart(4)} บาท/เดือน`,
+    );
   }
+  console.log(`  ${"รวมทั้งไซต์".padEnd(26)} ${monthTotal.toFixed(0)} บาท/เดือน (${(monthTotal / Math.max(1, perCam.size)).toFixed(0)} บาท/กล้อง โดยเฉลี่ย)`);
 }
 
 main().catch((err) => {
