@@ -713,6 +713,32 @@ async function maybeSendDailyReports(): Promise<void> {
     const vehicles = rows.filter(
       (r) => r.event_type === "vehicle_detected" || r.event_type === "lpr",
     ).length;
+
+    // Routine night movement (guard rounds, early staff): counted, never pushed.
+    const nightRows = rows
+      .filter((r) => {
+        const h = Number(
+          new Date(r.occurred_at).toLocaleString("en-GB", {
+            timeZone: "Asia/Bangkok",
+            hour: "2-digit",
+            hour12: false,
+          }),
+        );
+        if (h >= 7 && h < 19) return false;
+        if (r.ai?.verified !== true) return false;
+        const sawPerson = (r.ai as AiResult | null)?.detector?.objects?.some((o) => o.label === "person");
+        return sawPerson || /คน|บุคคล|พนักงาน|ชาย|หญิง|รปภ/.test(r.ai?.description_th ?? "");
+      })
+      .sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
+    const hhmmTh = (iso: string) =>
+      new Date(iso).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
+    const nightActivity = nightRows.length
+      ? {
+          count: nightRows.length,
+          firstTh: hhmmTh(nightRows[0].occurred_at),
+          lastTh: hhmmTh(nightRows[nightRows.length - 1].occurred_at),
+        }
+      : null;
     const offline = rows.filter((r) => r.event_type === "camera_offline").length;
 
     const stats = {
@@ -730,6 +756,7 @@ async function maybeSendDailyReports(): Promise<void> {
         month: "short",
       }),
       total: rows.length,
+      nightActivity,
       abnormalLines: abnormal.slice(0, 5).map((r) => {
         const t = new Date(r.occurred_at).toLocaleTimeString("th-TH", {
           timeZone: "Asia/Bangkok",

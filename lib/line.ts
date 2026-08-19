@@ -139,6 +139,10 @@ export function buildDailyReportText(stats: {
   camerasOnline: string; // "8/8"
   offlineIncidents: number;
   reportUrl: string;
+  // Night movement that was judged routine (guard rounds, early staff): not
+  // worth waking anyone at 03:00, but the morning report should still say it
+  // happened — silence would read as "nothing moved all night".
+  nightActivity?: { count: number; firstTh: string; lastTh: string } | null;
 }): string {
   const lines = [
     `☀️ รายงานประจำวัน — ${stats.siteName}`,
@@ -149,6 +153,11 @@ export function buildDailyReportText(stats: {
       : `เมื่อวานมีเหตุควรทราบ ${stats.abnormalLines.length} รายการ`,
     `• เหตุการณ์ทั้งหมด ${stats.total} รายการ`,
     ...stats.abnormalLines.map((l) => `• 🔴 ${l}`),
+    ...(stats.nightActivity && stats.nightActivity.count > 0
+      ? [
+          `• 🌙 กลางคืนมีคนเคลื่อนไหว ${stats.nightActivity.count} ครั้ง (${stats.nightActivity.firstTh}–${stats.nightActivity.lastTh}) — ระบบถือว่าเป็นการเดินตรวจ/เข้างานตามปกติ`,
+        ]
+      : []),
     `• 🚗 ยานพาหนะเข้า-ออก ${stats.vehicles} ครั้ง`,
     stats.offlineIncidents > 0
       ? `• ⚠️ กล้องขาดการติดต่อ ${stats.offlineIncidents} ครั้ง`
