@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, isWithinStrictHours } from "@/lib/vlm";
+import { buildPrompt, isNightBangkok, isWithinStrictHours } from "@/lib/vlm";
 
 const BASE_CTX = {
   eventType: "person_detected",
@@ -78,5 +78,24 @@ describe("buildPrompt — detector hint (ADR-015)", () => {
     const hint = "ตัวตรวจจับวัตถุเบื้องต้นพบ: คน 2 (ความมั่นใจ 0.87, 0.71) — ตัวเลขนี้เป็นเพียงคำใบ้ อาจผิดได้";
     expect(buildPrompt({ ...BASE_CTX, detectorHint: hint })).toContain("คน 2");
     expect(buildPrompt(BASE_CTX)).not.toContain("ตัวตรวจจับวัตถุเบื้องต้น");
+  });
+});
+
+describe("buildPrompt — night caution (2026-08-19: dog and empty room called 'a person')", () => {
+  it("warns about IR misreads only at night", () => {
+    const night = buildPrompt({ ...BASE_CTX, nowBangkok: "02:49" });
+    expect(night).toContain("กล้องอินฟราเรด");
+    expect(night).toContain("uncertain=true");
+    expect(buildPrompt({ ...BASE_CTX, nowBangkok: "14:00" })).not.toContain("กล้องอินฟราเรด");
+  });
+
+  it("covers the whole dark window and never fires in daylight", () => {
+    for (const t of ["19:00", "23:36", "04:57", "06:59"]) {
+      expect(isNightBangkok(t)).toBe(true);
+    }
+    for (const t of ["07:00", "12:00", "18:59"]) {
+      expect(isNightBangkok(t)).toBe(false);
+    }
+    expect(isNightBangkok(undefined)).toBe(false);
   });
 });

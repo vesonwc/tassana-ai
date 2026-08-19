@@ -192,3 +192,12 @@ describe("hints, crops, summaries", () => {
     expect(normalizeBox({ x: 192, y: 540, w: 960, h: 270 }, 1920, 1080)).toEqual([0.1, 0.5, 0.5, 0.25]);
   });
 });
+
+describe("buildDetectorHint — low confidence is stated, not hidden", () => {
+  it("flags a weak person reading as possibly an animal or shadow", () => {
+    const weak = buildDetectorHint([det("person", 0.43, 0, 0, 20, 40)]);
+    expect(weak).toContain("ความมั่นใจต่ำ");
+    const strong = buildDetectorHint([det("person", 0.82, 0, 0, 20, 40)]);
+    expect(strong).not.toContain("ความมั่นใจต่ำ");
+  });
+});

@@ -346,7 +346,10 @@ export function buildDetectorHint(dets: ObjectDetection[]): string {
       .slice(0, 4)
       .map((c) => c.toFixed(2))
       .join(", ");
-    return `${th} ${confs.length} (ความมั่นใจ ${shown}${confs.length > 4 ? ", …" : ""})`;
+    // A weak reading is worth saying out loud: at night the detector calls a
+    // dog or a chair "person" at exactly these confidences.
+    const weak = Math.max(...confs) < 0.5 ? " — ความมั่นใจต่ำ อาจเป็นสัตว์ เงา หรือวัตถุอื่น" : "";
+    return `${th} ${confs.length} (ความมั่นใจ ${shown}${confs.length > 4 ? ", …" : ""})${weak}`;
   });
   return `ตัวตรวจจับวัตถุเบื้องต้นพบ: ${parts.join(", ")} — ตัวเลขนี้เป็นเพียงคำใบ้ อาจผิดได้ ให้เชื่อสิ่งที่เห็นในภาพเป็นหลัก และภาพที่ 2 (ถ้ามี) คือส่วนขยายบริเวณที่พบ`;
 }

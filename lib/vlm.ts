@@ -69,6 +69,14 @@ export function isWithinStrictHours(
   return now >= start || now < end;
 }
 
+// 19:00–06:59 Bangkok: when the IR cut-in makes the picture unreliable.
+export function isNightBangkok(nowHHmm: string | undefined): boolean {
+  if (!nowHHmm) return false;
+  const h = Number(nowHHmm.slice(0, 2));
+  if (Number.isNaN(h)) return false;
+  return h >= 19 || h < 7;
+}
+
 export function buildPrompt(ctx: SnapshotContext): string {
   const isPatrol = /patrol/i.test(ctx.eventType) || ctx.eventType === "night_patrol";
   const lines = [
@@ -82,6 +90,15 @@ export function buildPrompt(ctx: SnapshotContext): string {
   if (ctx.profilePrompt) {
     lines.push(
       `หน้าที่เฉพาะของกล้องนี้${ctx.profileName ? ` (${ctx.profileName})` : ""}: ${ctx.profilePrompt}`,
+    );
+  }
+
+  // Night frames from an IR/low-light 704x480 stream are the main source of
+  // wrong verdicts: a stray dog, a chair or a shadow gets called "a person".
+  // Measured 2026-08-19 — 2 of 5 night alerts were a dog and an empty room.
+  if (isNightBangkok(ctx.nowBangkok)) {
+    lines.push(
+      "ภาพนี้ถ่ายกลางคืนจากกล้องอินฟราเรดความละเอียดต่ำ ซึ่งตีความผิดได้ง่ายมาก: สุนัข/แมวจร เงา ต้นไม้ไหว เก้าอี้ เสื้อคลุมพาดเก้าอี้ และวัตถุมืด มักถูกเข้าใจผิดว่าเป็นคน — กติกาสำหรับภาพกลางคืน: จะระบุว่าพบ \"คน/บุคคล\" ได้ก็ต่อเมื่อเห็นรูปทรงมนุษย์ชัดเจน (หัว ลำตัว แขนขา ในสัดส่วนคน) ถ้าเห็นเพียงเงาหรือวัตถุเคลื่อนไหวที่ระบุไม่ได้ ให้บรรยายตามที่เห็นจริง เช่น \"วัตถุเคลื่อนไหวขนาดเล็ก อาจเป็นสัตว์\" และตั้ง uncertain=true พร้อมถามผู้ดูแล แทนการเดาว่าเป็นคน; ถ้าภาพว่างเปล่าให้บอกตรง ๆ ว่าไม่พบสิ่งผิดปกติ",
     );
   }
 
