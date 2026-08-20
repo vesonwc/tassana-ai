@@ -37,9 +37,10 @@ function hourBangkok(iso: string): number {
 }
 
 // Did this event cost a Gemini call?
+const FREE_MODELS = new Set(["detector-gate", "skipped-backlog"]);
 function costsCall(ai: AiResult | null): boolean {
   const m = ai?.model;
-  return !!m && !m.endsWith("+inherit") && m !== "detector-gate";
+  return !!m && !m.endsWith("+inherit") && !FREE_MODELS.has(m);
 }
 
 async function main(): Promise<void> {
@@ -106,7 +107,9 @@ async function main(): Promise<void> {
           ? "สืบทอดคำตัดสินเดิม (ไม่เสียโควตา)"
           : m === "detector-gate"
             ? "YOLO กรอง (ไม่เสียโควตา)"
-            : "เรียก Gemini";
+            : m === "skipped-backlog"
+              ? "ล้างคิวค้าง (ไม่เสียโควตา)"
+              : "เรียก Gemini";
     slot.set(k, (slot.get(k) ?? 0) + 1);
   }
   console.log("\nแยกตามสิ่งที่เกิดขึ้นกับ event:");
