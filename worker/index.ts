@@ -38,6 +38,11 @@ const HEARTBEAT_CHECK_MS = 60_000;
 // ADR-015: model tag for events settled by the detector gate (no VLM call).
 const DETECTOR_GATE_MODEL = "detector-gate";
 const HEARTBEAT_TIMEOUT_MIN = Number(process.env.HEARTBEAT_TIMEOUT_MIN ?? 10);
+// An alert is only news while it is still true. Past this age it is labelled…
+const FRESH_ALERT_MIN = Number(process.env.FRESH_ALERT_MIN ?? 15);
+// …and past this age it is not pushed at all — the dashboard and the morning
+// report still carry it, but nobody should be sent running for yesterday.
+const STALE_ALERT_MAX_MIN = Number(process.env.STALE_ALERT_MAX_MIN ?? 6 * 60);
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -659,6 +664,19 @@ async function maybeSendLineAlert(
       hour: "2-digit",
       minute: "2-digit",
     });
+
+    // A backlog drained after a quota outage must not read like breaking news.
+    const ageMin = (Date.now() - new Date(row.occurred_at).getTime()) / 60_000;
+    if (ageMin > STALE_ALERT_MAX_MIN) {
+      console.log(
+        `worker: ${row.event_id} เก่าเกิน ${Math.round(ageMin / 60)} ชม. — ไม่ push แล้ว (อยู่ในรายงาน/หน้าเว็บ)`,
+      );
+      return;
+    }
+    const delayedNote =
+      ageMin > FRESH_ALERT_MIN
+        ? `⏰ แจ้งย้อนหลัง — เหตุนี้เกิดเมื่อ ${new Date(row.occurred_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} น. (ช้าไป ${ageMin < 120 ? `${Math.round(ageMin)} นาที` : `${Math.round(ageMin / 60)} ชั่วโมง`})`
+        : null;
     const flex = buildAlertFlex({
       severity: analysis.severity,
       eventTypeTh: TYPE_TH[row.event_type as EventType] ?? row.event_type,
@@ -668,6 +686,7 @@ async function maybeSendLineAlert(
       timeTh: `${timeTh} น.`,
       imageUrl,
       dashboardUrl: `${APP_URL}/dashboard/sites/${row.site_id}`,
+      delayedNote,
     });
 
     const result = await pushLineMessage(to, [flex]);

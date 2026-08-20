@@ -14,6 +14,10 @@ export interface AlertPayload {
   timeTh: string; // "02:14 น."
   imageUrl: string | null; // https signed URL
   dashboardUrl: string;
+  // Set when the push is going out long after the event (backlog drained after
+  // a quota outage). An alert that reads as "now" but happened yesterday sends
+  // people running for nothing — say so on the card.
+  delayedNote?: string | null;
 }
 
 const SEVERITY_HEADER: Record<Severity, { emoji: string; label: string; color: string }> = {
@@ -34,6 +38,19 @@ export function buildAlertFlex(a: AlertPayload): Record<string, unknown> {
       color: head.color,
       wrap: true,
     },
+    ...(a.delayedNote
+      ? [
+          {
+            type: "text",
+            text: a.delayedNote,
+            size: "xs",
+            weight: "bold",
+            color: "#B26A00",
+            wrap: true,
+            margin: "sm",
+          },
+        ]
+      : []),
     { type: "text", text: a.descriptionTh, size: "sm", wrap: true, margin: "sm" },
     {
       type: "text",

@@ -38,3 +38,28 @@ describe("buildDailyReportText — night activity line", () => {
     expect(text.indexOf("🔴")).toBeLessThan(text.indexOf("🌙"));
   });
 });
+
+import { buildAlertFlex } from "@/lib/line";
+
+describe("buildAlertFlex — delayed alerts must not read as breaking news", () => {
+  const base = {
+    severity: "warning" as const,
+    eventTypeTh: "พบบุคคล",
+    descriptionTh: "พบบุคคลพยายามเปิดประตูรถ",
+    cameraName: "กล้องช่อง 1",
+    siteName: "สำนักงานใหญ่",
+    timeTh: "15:27 น.",
+    imageUrl: null,
+    dashboardUrl: "https://example.test/d",
+  };
+
+  it("shows the backlog banner when one is supplied", () => {
+    const flex = buildAlertFlex({ ...base, delayedNote: "⏰ แจ้งย้อนหลัง — เหตุนี้เกิดเมื่อ 19 ส.ค. 15:27 น. (ช้าไป 23 ชั่วโมง)" });
+    expect(JSON.stringify(flex)).toContain("แจ้งย้อนหลัง");
+  });
+
+  it("stays clean for a fresh alert", () => {
+    expect(JSON.stringify(buildAlertFlex(base))).not.toContain("ย้อนหลัง");
+    expect(JSON.stringify(buildAlertFlex({ ...base, delayedNote: null }))).not.toContain("ย้อนหลัง");
+  });
+});
