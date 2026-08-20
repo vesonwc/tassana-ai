@@ -40,10 +40,23 @@ const BUSY_END = process.env.NVR_BUSY_END ?? "19:00";
 // stats while people move — so the bar is set low, and a forced refresh
 // guarantees the cloud still sees every channel at least periodically.
 const MIN_FRAME_DIFF_PCT = Number(process.env.NVR_MIN_FRAME_DIFF ?? 1.5);
-const FORCE_SEND_EVERY_MS = Number(process.env.NVR_FORCE_SEND_MS ?? 10 * 60_000);
+const FORCE_SEND_EVERY_MS = Number(process.env.NVR_FORCE_SEND_MS ?? 30 * 60_000);
 // ADR-017: run the object detector here instead of trusting a blind cooldown.
 // Off by default so a bridge PC that has not been updated behaves as before.
 const YOLO_ON = process.env.NVR_YOLO === "1";
+// ADR-017 (แก้ 2026-08-20): งบการวิเคราะห์มีจำกัด จึงจัดสรรตามคุณค่า —
+// กลางวันออฟฟิศคนเดินตลอด ภาพ "เปลี่ยน" ทุก 20 วิ แต่แทบไม่มีอะไรน่าสนใจ;
+// กลางคืนคนเดียวที่เดินผ่านคือเรื่องสำคัญ. ตัวตรวจจับจึงใช้ "ลัดคิว" เมื่อมี
+// ของใหม่โผล่ ไม่ใช่ใช้ยกเลิกการเว้นระยะทั้งหมด.
+const NIGHT_START = Number(process.env.NVR_NIGHT_START ?? 19);
+const NIGHT_END = Number(process.env.NVR_NIGHT_END ?? 7);
+const DAY_FLOOR_MS = Number(process.env.NVR_DAY_FLOOR_MS ?? 12 * 60_000);
+const NIGHT_FLOOR_MS = Number(process.env.NVR_NIGHT_FLOOR_MS ?? 30_000);
+
+function isNightBangkok(): boolean {
+  const h = Number(new Date().toLocaleString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", hour12: false }));
+  return NIGHT_START > NIGHT_END ? h >= NIGHT_START || h < NIGHT_END : h >= NIGHT_START && h < NIGHT_END;
+}
 
 function bangkokHHmm(): string {
   return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
@@ -232,18 +245,28 @@ async function forwardEvent(xml: string): Promise<void> {
   const mustRefresh = staleForMs >= FORCE_SEND_EVERY_MS;
   if (image && !serious && !mustRefresh) {
     if (useDetector) {
-      // ADR-017: content decides, not the clock.
+      // ADR-017: content decides *when within the budget*, not whether there is
+      // a budget at all. Daytime keeps a long floor (an office simply has people
+      // in it); night lets almost any change through.
       const run = await detectObjects(image);
       if (run) {
+        const night = isNightBangkok();
+        const floorMs = night ? NIGHT_FLOOR_MS : DAY_FLOOR_MS;
         const prev = lastDetections.get(channel) ?? null;
         const verdict = sceneChanged(prev, run.detections);
-        if (!verdict.changed) {
+        const withinFloor = staleForMs < floorMs;
+        // Inside the floor only an arrival gets through; movement waits.
+        const pass = verdict.changed && (!withinFloor || verdict.significant);
+        if (!pass) {
           skippedSimilar += 1;
           lastSeen.set(key, now);
+          // Remember what we saw even when not sending, so the next comparison
+          // is against reality rather than a stale frame from minutes ago.
+          lastDetections.set(channel, run.detections);
           return;
         }
         console.log(
-          `nvr-listener: ch${channel} เปลี่ยน (${verdict.reason}) — ${summarizeLabels(run.detections)} [${run.ms}ms]`,
+          `nvr-listener: ch${channel} ส่ง (${verdict.reason}${verdict.significant ? " · ของใหม่" : ""}, ${night ? "กลางคืน" : "กลางวัน"}) — ${summarizeLabels(run.detections)} [${run.ms}ms]`,
         );
         lastDetections.set(channel, run.detections);
       }
@@ -430,7 +453,7 @@ async function main(): Promise<void> {
   }
   setInterval(() => {
     console.log(
-      `nvr-listener: alive — ${YOLO_ON && detectorReady() ? "โหมดตรวจจับภาพ (ไม่ใช้ cooldown)" : isBusyHours() ? `เวลางาน (cooldown ${Math.round(COOLDOWN_BUSY_MS / 60_000)} นาที/ช่อง)` : `นอกเวลางาน (cooldown ${Math.round(COOLDOWN_QUIET_MS / 1000)} วิ)`} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
+      `nvr-listener: alive — ${YOLO_ON && detectorReady() ? `โหมดตรวจจับภาพ (${isNightBangkok() ? `กลางคืน ทุก ${Math.round(NIGHT_FLOOR_MS / 1000)} วิ` : `กลางวัน ทุก ${Math.round(DAY_FLOOR_MS / 60_000)} นาที`})` : isBusyHours() ? `เวลางาน (cooldown ${Math.round(COOLDOWN_BUSY_MS / 60_000)} นาที/ช่อง)` : `นอกเวลางาน (cooldown ${Math.round(COOLDOWN_QUIET_MS / 1000)} วิ)`} | ส่งแล้ว ${sentCount} | ข้าม: cooldown ${skippedCooldown}, ภาพซ้ำ ${skippedSimilar}`,
     );
   }, HEARTBEAT_EVERY_MS);
 }

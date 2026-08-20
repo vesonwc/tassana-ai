@@ -18,6 +18,10 @@ export interface SceneChangeOptions {
 
 export interface SceneChangeResult {
   changed: boolean;
+  // Something ARRIVED that was not there before (a new class, or more of one).
+  // Movement of things already present, or something leaving, is a change but
+  // not an arrival — and only arrivals are worth jumping the queue for.
+  significant: boolean;
   reason: string;
 }
 
@@ -66,25 +70,34 @@ export function sceneChanged(
   const moveIou = opts.moveIou ?? 0.6;
   const minConfidence = opts.minConfidence ?? 0.3;
   // No baseline yet — the first frame after start-up is always worth sending.
-  if (prev === null) return { changed: true, reason: "ยังไม่มีภาพอ้างอิง" };
+  if (prev === null) return { changed: true, significant: true, reason: "ยังไม่มีภาพอ้างอิง" };
 
   const a = relevant(prev, minConfidence);
   const b = relevant(next, minConfidence);
   if (a.length === 0 && b.length === 0) {
-    return { changed: false, reason: "ไม่มีคน/รถ ทั้งภาพก่อนและภาพนี้" };
+    return { changed: false, significant: false, reason: "ไม่มีคน/รถ ทั้งภาพก่อนและภาพนี้" };
   }
   const ca = countByLabel(a);
   const cb = countByLabel(b);
+  // Arrivals first — these are the ones allowed to jump the queue.
   for (const [label, n] of cb) {
     const before = ca.get(label) ?? 0;
-    if (n > before) return { changed: true, reason: `${label} เพิ่มจาก ${before} เป็น ${n}` };
-    if (n < before) return { changed: true, reason: `${label} ลดจาก ${before} เหลือ ${n}` };
+    if (n > before) {
+      return {
+        changed: true,
+        significant: true,
+        reason: before === 0 ? `${label} ปรากฏขึ้นใหม่` : `${label} เพิ่มจาก ${before} เป็น ${n}`,
+      };
+    }
   }
   for (const [label, n] of ca) {
-    if (!cb.has(label)) return { changed: true, reason: `${label} ${n} หายไปจากภาพ` };
+    const now = cb.get(label) ?? 0;
+    if (now < n) {
+      return { changed: true, significant: false, reason: `${label} ลดจาก ${n} เหลือ ${now}` };
+    }
   }
   if (!everyObjectStayedPut(a, b, moveIou)) {
-    return { changed: true, reason: "มีวัตถุเปลี่ยนตำแหน่ง" };
+    return { changed: true, significant: false, reason: "มีวัตถุเปลี่ยนตำแหน่ง" };
   }
-  return { changed: false, reason: "จำนวนและตำแหน่งเหมือนเดิม" };
+  return { changed: false, significant: false, reason: "จำนวนและตำแหน่งเหมือนเดิม" };
 }

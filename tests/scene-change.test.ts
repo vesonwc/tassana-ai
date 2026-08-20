@@ -61,3 +61,29 @@ describe("sceneChanged — ADR-017 bridge filter", () => {
     expect(sceneChanged(before, after).changed).toBe(true);
   });
 });
+
+describe("significant = something arrived (ADR-017 แก้ 2026-08-20)", () => {
+  it("marks a new person or an extra car as an arrival", () => {
+    expect(sceneChanged([at("car", 0, 0)], [at("car", 0, 0), at("person", 300, 200)]).significant).toBe(true);
+    expect(sceneChanged([at("car", 0, 0)], [at("car", 0, 0), at("car", 200, 0)]).significant).toBe(true);
+  });
+
+  it("does NOT mark mere movement as an arrival — this is what flooded the office at 20s intervals", () => {
+    const r = sceneChanged([at("person", 100, 100)], [at("person", 400, 120)]);
+    expect(r.changed).toBe(true);
+    expect(r.significant).toBe(false);
+  });
+
+  it("does NOT mark someone leaving as an arrival", () => {
+    const r = sceneChanged([at("person", 0, 0), at("person", 500, 0)], [at("person", 0, 0)]);
+    expect(r.changed).toBe(true);
+    expect(r.significant).toBe(false);
+  });
+
+  it("an unchanged scene is neither changed nor significant", () => {
+    const lot = [at("car", 0, 0), at("car", 200, 0)];
+    const r = sceneChanged(lot, [at("car", 2, 1), at("car", 201, 0)]);
+    expect(r.changed).toBe(false);
+    expect(r.significant).toBe(false);
+  });
+});
