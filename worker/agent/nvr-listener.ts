@@ -51,7 +51,10 @@ const YOLO_ON = process.env.NVR_YOLO === "1";
 const NIGHT_START = Number(process.env.NVR_NIGHT_START ?? 19);
 const NIGHT_END = Number(process.env.NVR_NIGHT_END ?? 7);
 const DAY_FLOOR_MS = Number(process.env.NVR_DAY_FLOOR_MS ?? 12 * 60_000);
-const NIGHT_FLOOR_MS = Number(process.env.NVR_NIGHT_FLOOR_MS ?? 30_000);
+// 5 นาที (เจ้าของกำหนด 2026-08-20): การบุกรุก/ขโมยจริงใช้เวลานานกว่านั้นเสมอ
+// จึงไม่ต้องเก็บทุกเฟรม — และการ "มาใหม่" ยังลัดคิวได้ทันทีอยู่แล้ว ภาพแรก
+// ที่คนโผล่เข้ามาในลานว่างจึงไม่ถูกหน่วงเลย ที่ลดลงคือเฟรมตามหลังเท่านั้น
+const NIGHT_FLOOR_MS = Number(process.env.NVR_NIGHT_FLOOR_MS ?? 5 * 60_000);
 
 function isNightBangkok(): boolean {
   const h = Number(new Date().toLocaleString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", hour12: false }));
