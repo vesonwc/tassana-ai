@@ -28,7 +28,7 @@ const supabase = createClient(url, key, { auth: { persistSession: false } });
 const APPLY = process.argv.includes("--apply");
 const OLDER_THAN_MIN = Number(process.argv.find((a) => /^\d+$/.test(a)) ?? 30);
 // Marker so these rows are never mistaken for "the VLM tried and failed".
-const SKIPPED_MODEL = "skipped-backlog";
+const SKIPPED_MODEL = "skipped-stale";
 
 const th = (d: string) => new Date(d).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
 

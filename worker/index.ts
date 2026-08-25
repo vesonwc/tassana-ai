@@ -43,6 +43,10 @@ const FRESH_ALERT_MIN = Number(process.env.FRESH_ALERT_MIN ?? 15);
 // …and past this age it is not pushed at all — the dashboard and the morning
 // report still carry it, but nobody should be sent running for yesterday.
 const STALE_ALERT_MAX_MIN = Number(process.env.STALE_ALERT_MAX_MIN ?? 6 * 60);
+// Past this age an event is not worth a paid look at all — the budget belongs
+// to what is happening now. Keeps the queue from drifting days behind.
+const STALE_ANALYZE_MAX_MIN = Number(process.env.STALE_ANALYZE_MAX_MIN ?? 3 * 60);
+let staleSkipped = 0;
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -349,6 +353,28 @@ async function handleMessage(msg: QueueMessage): Promise<void> {
 
   if (row.ai?.processed_at) {
     await ack(msg.msg_id);
+    return;
+  }
+
+  // A daily budget plus an unbounded queue means FIFO eventually analyses only
+  // the past: measured 2026-08-25, the worker was four days behind and spending
+  // every day's quota on frames nobody could act on any more. Anything older
+  // than this is settled without a VLM call so today's events get the budget.
+  const eventAgeMin = (Date.now() - new Date(row.occurred_at).getTime()) / 60_000;
+  if (eventAgeMin > STALE_ANALYZE_MAX_MIN) {
+    await updateAi(eventId, {
+      verified: null,
+      severity: null,
+      description_th: `ไม่ได้วิเคราะห์ — ภาพเก่าเกิน ${Math.round(STALE_ANALYZE_MAX_MIN / 60)} ชั่วโมงตอนถึงคิว (ภาพยังดูย้อนหลังได้)`,
+      model: "skipped-stale",
+      processed_at: new Date().toISOString(),
+      detector: null,
+    });
+    await ack(msg.msg_id);
+    staleSkipped += 1;
+    if (staleSkipped % 50 === 0) {
+      console.warn(`worker: ข้ามภาพเก่าไปแล้ว ${staleSkipped} ใบ (คิวตามหลังอยู่)`);
+    }
     return;
   }
 
