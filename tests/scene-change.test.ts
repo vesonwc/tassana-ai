@@ -63,9 +63,20 @@ describe("sceneChanged — ADR-017 bridge filter", () => {
 });
 
 describe("significant = something arrived (ADR-017 แก้ 2026-08-20)", () => {
-  it("marks a new person or an extra car as an arrival", () => {
+  it("marks a person appearing where there was none as an arrival", () => {
     expect(sceneChanged([at("car", 0, 0)], [at("car", 0, 0), at("person", 300, 200)]).significant).toBe(true);
-    expect(sceneChanged([at("car", 0, 0)], [at("car", 0, 0), at("car", 200, 0)]).significant).toBe(true);
+    expect(sceneChanged([], [at("person", 300, 200)]).significant).toBe(true);
+  });
+
+  it("does NOT treat one more of something already present as an arrival", () => {
+    // 2026-08-28: this is what flooded the office again — with 5-8 people in
+    // frame the detector count oscillates, so 4→5 fired every few seconds.
+    const five = [at("person", 0, 0), at("person", 100, 0), at("person", 200, 0), at("person", 300, 0), at("person", 400, 0)];
+    const six = [...five, at("person", 500, 0)];
+    const r = sceneChanged(five, six);
+    expect(r.changed).toBe(true);
+    expect(r.significant).toBe(false);
+    expect(sceneChanged([at("car", 0, 0)], [at("car", 0, 0), at("car", 200, 0)]).significant).toBe(false);
   });
 
   it("does NOT mark mere movement as an arrival — this is what flooded the office at 20s intervals", () => {

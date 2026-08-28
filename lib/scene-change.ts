@@ -79,15 +79,22 @@ export function sceneChanged(
   }
   const ca = countByLabel(a);
   const cb = countByLabel(b);
-  // Arrivals first — these are the ones allowed to jump the queue.
+  // Only "something appeared where there was nothing of its kind" jumps the
+  // queue. Measured 2026-08-28: treating any count increase as an arrival
+  // flooded a busy office — with 5-8 people in frame the detector's count
+  // oscillates every few seconds (someone occluded, then re-detected), so
+  // 4→5 fired constantly. In an already-occupied room one more person is not
+  // news; in an empty car park at 3am, one person is the whole point.
+  for (const [label, n] of cb) {
+    const before = ca.get(label) ?? 0;
+    if (before === 0 && n > 0) {
+      return { changed: true, significant: true, reason: `${label} ปรากฏขึ้นใหม่` };
+    }
+  }
   for (const [label, n] of cb) {
     const before = ca.get(label) ?? 0;
     if (n > before) {
-      return {
-        changed: true,
-        significant: true,
-        reason: before === 0 ? `${label} ปรากฏขึ้นใหม่` : `${label} เพิ่มจาก ${before} เป็น ${n}`,
-      };
+      return { changed: true, significant: false, reason: `${label} เพิ่มจาก ${before} เป็น ${n}` };
     }
   }
   for (const [label, n] of ca) {
